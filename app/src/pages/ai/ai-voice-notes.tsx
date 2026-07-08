@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { useSpeechRecognition, isSpeechRecognitionSupported } from "@/hooks/use-speech-recognition";
@@ -109,7 +108,6 @@ export default function AIVoiceNotes() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [recordingTimer, setRecordingTimer] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -136,9 +134,8 @@ export default function AIVoiceNotes() {
 
   const startTimer = useCallback(() => {
     stopTimer();
-    setRecordingTimer(0);
     timerRef.current = setInterval(() => {
-      setRecordingTimer((prev) => prev + 1);
+      // Timer tick - duration comes from useVoiceRecorder
     }, 1000);
   }, []);
 
@@ -204,7 +201,6 @@ export default function AIVoiceNotes() {
     setVoiceNotes((prev) => [newNote, ...prev]);
     recorder.reset();
     speech.reset();
-    setRecordingTimer(0);
     toast.success("Voice note saved");
   }, [recorder, speech, voiceNotes.length]);
 
@@ -536,7 +532,6 @@ export default function AIVoiceNotes() {
                     onClick={() => {
                       recorder.reset();
                       speech.reset();
-                      setRecordingTimer(0);
                     }}
                   >
                     <RotateCcw className="h-5 w-5" />
