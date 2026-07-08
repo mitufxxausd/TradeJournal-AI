@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   PlusCircle,
@@ -27,9 +28,18 @@ import {
   Sun,
   Moon,
   BookOpen,
+  Sparkles,
+  Camera,
+  Mic,
+  Brain,
+  ClipboardList,
+  CreditCard,
+  Cpu,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
-const navItems = [
+const mainNavItems = [
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/trades/new", label: "Add Trade", icon: PlusCircle },
   { path: "/trades", label: "All Trades", icon: List },
@@ -38,12 +48,23 @@ const navItems = [
   { path: "/settings", label: "Settings", icon: Settings },
 ];
 
+const aiNavItems = [
+  { path: "/ai/dashboard", label: "AI Dashboard", icon: Sparkles },
+  { path: "/ai/screenshot", label: "Screenshot Analysis", icon: Camera },
+  { path: "/ai/voice", label: "Voice Notes", icon: Mic },
+  { path: "/ai/coach", label: "AI Coach", icon: Brain },
+  { path: "/ai/summary", label: "Trade Summary", icon: ClipboardList },
+  { path: "/ai/settings", label: "AI Settings", icon: Cpu },
+  { path: "/ai/subscription", label: "Subscription", icon: CreditCard },
+];
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, userProfile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [aiExpanded, setAiExpanded] = useState(true);
 
   const handleLogout = async () => {
     try {
@@ -65,6 +86,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .slice(0, 2);
   };
 
+  const isAIActive = aiNavItems.some((item) => location.pathname === item.path);
+
   const sidebarContent = (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-3 border-b px-6">
@@ -76,18 +99,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <ScrollArea className="flex-1 py-4">
         <nav className="space-y-1 px-3">
-          {navItems.map((item) => {
+          {mainNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link
                 key={item.path}
                 to={item.path}
                 onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
                   isActive
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
+                )}
               >
                 <item.icon className="h-4 w-4" />
                 {item.label}
@@ -95,6 +119,53 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+
+        {/* AI Workspace Section */}
+        <div className="mt-4 px-3">
+          <button
+            onClick={() => setAiExpanded(!aiExpanded)}
+            className={cn(
+              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-semibold transition-all",
+              isAIActive
+                ? "bg-gradient-to-r from-primary/20 to-primary/5 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-4 w-4" />
+              <span>AI Workspace</span>
+            </div>
+            {aiExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+          </button>
+
+          {aiExpanded && (
+            <nav className="mt-1 space-y-1 pl-4">
+              {aiNavItems.map((item) => {
+                const isActive = location.pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+                      isActive
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                    )}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          )}
+        </div>
       </ScrollArea>
 
       <div className="border-t p-4">
