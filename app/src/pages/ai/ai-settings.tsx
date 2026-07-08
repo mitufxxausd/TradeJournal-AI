@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -75,7 +75,7 @@ const aiProviders: AIProvider[] = [
     id: "groq",
     name: "Groq",
     description: "Ultra-fast inference with Llama 3.3 70B.",
-    icon: Server,
+    icon: Brain,
     status: "available",
     model: "llama-3.3-70b-versatile",
     capabilities: ["Chat", "Trade Analysis", "Coaching"],
@@ -121,7 +121,7 @@ const featureToggles = [
 // ─── Main Component ───
 
 export default function AISettings() {
-  const { tier } = useSubscription();
+  const { setTier } = useSubscription();
   const [activeProvider, setActiveProvider] = useState("mock");
   const [toggles, setToggles] = useState<Record<string, boolean>>(
     Object.fromEntries(featureToggles.map((f) => [f.id, f.defaultValue]))
