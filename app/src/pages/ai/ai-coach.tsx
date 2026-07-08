@@ -23,7 +23,6 @@ import {
   Award,
   Zap,
   Heart,
-  Clock,
   Calendar,
   Loader2,
 } from "lucide-react";
@@ -216,7 +215,7 @@ function CoachingCard({ area }: { area: typeof mockCoachingAreas[0] }) {
 // ─── Main Component ───
 
 export default function AICoach() {
-  const { hasAccess, isElite } = useSubscription();
+  const { hasAccess } = useSubscription();
   const [isGenerating, setIsGenerating] = useState(false);
   const canAccess = hasAccess("aiCoaching");
 
