@@ -49,8 +49,6 @@ const TRADING_PAIRS = [
   "USOIL", "UKOIL", "GER40", "NAS100", "SPX500",
 ];
 
-const TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN", "1D", "1W", "1M"];
-
 const DIRECTION_WORDS: Record<string, "buy" | "sell"> = {
   "buy": "buy", "long": "buy", "bullish": "buy",
   "sell": "sell", "short": "sell", "bearish": "sell",
