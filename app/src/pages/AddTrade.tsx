@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,7 @@ const DEFAULT_TAGS = ["Scalp", "Swing", "Breakout", "Reversal", "Liquidity", "Lo
 export default function AddTrade() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const isEditing = !!id;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,6 +84,52 @@ export default function AddTrade() {
     during: { fear: 5, greed: 5, patience: 5, discipline: 5 },
     after: { emotion: "Neutral", mistakes: "", lessonsLearned: "" },
   });
+
+  // ─── Auto-fill from OCR query params ───
+  useEffect(() => {
+    const ocrPair = searchParams.get("pair");
+    const ocrDirection = searchParams.get("direction");
+    const ocrEntry = searchParams.get("entryPrice");
+    const ocrStopLoss = searchParams.get("stopLoss");
+    const ocrTakeProfit = searchParams.get("takeProfit");
+    const ocrPositionSize = searchParams.get("positionSize");
+    const ocrRrRatio = searchParams.get("rrRatio");
+
+    let filledAny = false;
+
+    if (ocrPair) {
+      setPair(ocrPair);
+      filledAny = true;
+    }
+    if (ocrDirection && (ocrDirection === "Buy" || ocrDirection === "Sell")) {
+      setDirection(ocrDirection);
+      filledAny = true;
+    }
+    if (ocrEntry) {
+      setEntryPrice(ocrEntry);
+      filledAny = true;
+    }
+    if (ocrStopLoss) {
+      setStopLoss(ocrStopLoss);
+      filledAny = true;
+    }
+    if (ocrTakeProfit) {
+      setTakeProfit(ocrTakeProfit);
+      filledAny = true;
+    }
+    if (ocrPositionSize) {
+      setPositionSize(ocrPositionSize);
+      filledAny = true;
+    }
+    if (ocrRrRatio) {
+      setRiskPercent(ocrRrRatio);
+      filledAny = true;
+    }
+
+    if (filledAny) {
+      toast.success("Form pre-filled from OCR analysis. Please review and edit before saving.");
+    }
+  }, [searchParams]);
 
   // Load trade for editing
   useEffect(() => {
@@ -206,8 +253,6 @@ export default function AddTrade() {
   };
 
   const handleDeleteScreenshot = async (screenshot: TradeScreenshot) => {
-    // For Cloudinary unsigned uploads, we can't delete via the client API
-    // Just remove from local state - the image will remain on Cloudinary
     setScreenshots(screenshots.filter((s) => s.id !== screenshot.id));
     toast.success("Screenshot removed");
   };

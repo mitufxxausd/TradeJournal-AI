@@ -1,11 +1,21 @@
-import { useState, useEffect } from "react";
+/**
+ * AI Dashboard Page
+ * Displays real database statistics only. No mock data, no fabricated insights.
+ * All values come from the user's actual trade history.
+ */
+
+import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useSubscription } from "@/hooks/use-subscription";
+import { useAuth } from "@/hooks/use-auth";
+import { fetchTrades } from "@/lib/firestore";
 import { cn } from "@/lib/utils";
+import type { Trade } from "@/types/trade";
 import {
   Sparkles,
   Camera,
@@ -13,44 +23,33 @@ import {
   Brain,
   ClipboardList,
   CreditCard,
-  TrendingUp,
-  Zap,
-  Lock,
-  BarChart3,
   ArrowRight,
-  Activity,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  BarChart3,
+  DollarSign,
+  Target,
   Clock,
-  CheckCircle2,
+  Award,
   AlertCircle,
+  Lock,
 } from "lucide-react";
 
-// ─── Mock Data ───
+// ─── Types ───
 
-const mockRecentActivity = [
-  { id: "1", type: "screenshot" as const, title: "EURUSD 1H Analysis", time: "2 min ago", status: "completed" as const },
-  { id: "2", type: "voice" as const, title: "Trade Review Note", time: "15 min ago", status: "completed" as const },
-  { id: "3", type: "coaching" as const, title: "Weekly Coaching Report", time: "1 hour ago", status: "completed" as const },
-  { id: "4", type: "summary" as const, title: "XAUUSD Trade Summary", time: "3 hours ago", status: "completed" as const },
-];
-
-const mockRecentScreenshots = [
-  { id: "1", pair: "EURUSD", timeframe: "1H", confidence: 87, direction: "buy" as const },
-  { id: "2", pair: "GBPUSD", timeframe: "4H", confidence: 72, direction: "sell" as const },
-  { id: "3", pair: "XAUUSD", timeframe: "15M", confidence: 91, direction: "buy" as const },
-];
-
-const mockVoiceNotes = [
-  { id: "1", name: "Pre-session Analysis", duration: "3:24", date: "Today" },
-  { id: "2", name: "Trade Review - EURUSD", duration: "5:12", date: "Today" },
-  { id: "3", name: "Weekly Reflection", duration: "8:45", date: "Yesterday" },
-];
-
-const mockCoachingInsights = [
-  { id: "1", category: "Discipline", score: 82, trend: "up" as const },
-  { id: "2", category: "Psychology", score: 68, trend: "up" as const },
-  { id: "3", category: "Risk Management", score: 75, trend: "down" as const },
-  { id: "4", category: "Execution", score: 90, trend: "up" as const },
-];
+interface TradeStats {
+  totalTrades: number;
+  netProfit: number;
+  winRate: number;
+  avgRR: number;
+  avgHoldTime: number;
+  bestPair: string;
+  worstPair: string;
+  currentStreak: number;
+  streakType: "win" | "loss" | "none";
+  monthlyPerformance: { month: string; profit: number; trades: number }[];
+}
 
 // ─── Quick Action Card ───
 
@@ -61,7 +60,6 @@ interface QuickActionProps {
   href: string;
   color: string;
   locked?: boolean;
-  onClick?: () => void;
 }
 
 function QuickActionCard({ icon: Icon, title, description, href, color, locked }: QuickActionProps) {
@@ -90,27 +88,194 @@ function QuickActionCard({ icon: Icon, title, description, href, color, locked }
   );
 }
 
+// ─── Stat Card ───
+
+function StatCard({ title, value, subtitle, icon: Icon, color, loading }: {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  icon: React.ElementType;
+  color: string;
+  loading: boolean;
+}) {
+  return (
+    <Card className="relative overflow-hidden transition-all hover:shadow-md">
+      <div className={cn("absolute right-0 top-0 h-16 w-16 -translate-y-4 translate-x-4 rounded-full", color)} />
+      <CardHeader className="pb-2">
+        <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+          <Icon className="h-3.5 w-3.5" />
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-8 w-24" />
+        ) : (
+          <>
+            <div className="text-2xl font-bold">{value}</div>
+            {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Empty State ───
+
+function EmptyState() {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="flex flex-col items-center justify-center py-12 px-4 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+          <AlertCircle className="h-7 w-7 text-muted-foreground" />
+        </div>
+        <h3 className="mt-4 text-lg font-semibold">No Trade Data Available</h3>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+          Start adding trades to your journal to see AI-powered statistics and insights here.
+        </p>
+        <Button className="mt-4" asChild>
+          <Link to="/trades/new">Add Your First Trade</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Statistics Calculator ───
+
+function calculateStats(trades: Trade[]): TradeStats {
+  const totalTrades = trades.length;
+  const winningTrades = trades.filter((t) => (t.profitLoss || 0) > 0);
+  const losingTrades = trades.filter((t) => (t.profitLoss || 0) < 0);
+  const netProfit = trades.reduce((sum, t) => sum + (t.profitLoss || 0), 0);
+  const winRate = totalTrades > 0 ? (winningTrades.length / totalTrades) * 100 : 0;
+
+  // Average R:R
+  const tradesWithRR = trades.filter((t) => t.rrRatio !== null && t.rrRatio !== undefined);
+  const avgRR = tradesWithRR.length > 0
+    ? tradesWithRR.reduce((sum, t) => sum + (t.rrRatio || 0), 0) / tradesWithRR.length
+    : 0;
+
+  // Best/Worst pair
+  const pairStats: Record<string, { profit: number; trades: number }> = {};
+  for (const trade of trades) {
+    if (!pairStats[trade.pair]) {
+      pairStats[trade.pair] = { profit: 0, trades: 0 };
+    }
+    pairStats[trade.pair].profit += trade.profitLoss || 0;
+    pairStats[trade.pair].trades += 1;
+  }
+
+  let bestPair = "No data";
+  let worstPair = "No data";
+  let bestProfit = -Infinity;
+  let worstProfit = Infinity;
+
+  for (const [pair, stats] of Object.entries(pairStats)) {
+    if (stats.profit > bestProfit) {
+      bestProfit = stats.profit;
+      bestPair = pair;
+    }
+    if (stats.profit < worstProfit) {
+      worstProfit = stats.profit;
+      worstPair = pair;
+    }
+  }
+
+  // Current streak
+  const sortedByDate = [...trades].sort((a, b) =>
+    (b.tradeDate || b.createdAt).localeCompare(a.tradeDate || a.createdAt)
+  );
+  let currentStreak = 0;
+  let streakType: "win" | "loss" | "none" = "none";
+  if (sortedByDate.length > 0) {
+    const firstTrade = sortedByDate[0];
+    const isWin = (firstTrade.profitLoss || 0) > 0;
+    streakType = isWin ? "win" : "loss";
+    for (const trade of sortedByDate) {
+      const tradeWin = (trade.profitLoss || 0) > 0;
+      if (tradeWin === isWin) {
+        currentStreak++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Monthly performance
+  const monthMap: Record<string, { profit: number; trades: number }> = {};
+  for (const trade of trades) {
+    const date = trade.tradeDate || trade.createdAt;
+    const monthKey = date.substring(0, 7); // YYYY-MM
+    if (!monthMap[monthKey]) {
+      monthMap[monthKey] = { profit: 0, trades: 0 };
+    }
+    monthMap[monthKey].profit += trade.profitLoss || 0;
+    monthMap[monthKey].trades += 1;
+  }
+  const monthlyPerformance = Object.entries(monthMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-12)
+    .map(([month, data]) => ({
+      month: new Date(month + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+      profit: data.profit,
+      trades: data.trades,
+    }));
+
+  return {
+    totalTrades,
+    netProfit,
+    winRate,
+    avgRR,
+    avgHoldTime: 0, // Would need entry/exit times to calculate
+    bestPair,
+    worstPair,
+    currentStreak,
+    streakType,
+    monthlyPerformance,
+  };
+}
+
 // ─── Main Component ───
 
 export default function AIDashboard() {
+  const { user } = useAuth();
   const { tier, hasAccess, isPro, isElite } = useSubscription();
-  const [animatedProgress, setAnimatedProgress] = useState(0);
-
-  const freeCredits = isElite ? "Unlimited" : isPro ? "50 remaining" : "3 remaining";
-  const creditPercent = isElite ? 100 : isPro ? 70 : 30;
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setAnimatedProgress(creditPercent), 300);
-    return () => clearTimeout(timer);
-  }, [creditPercent]);
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
-  const getTierBadge = () => {
-    if (isElite) return { label: "ELITE", variant: "default" as const, className: "bg-gradient-to-r from-amber-500 to-yellow-400 text-black border-0" };
-    if (isPro) return { label: "PRO", variant: "default" as const, className: "bg-gradient-to-r from-blue-500 to-cyan-400 text-white border-0" };
-    return { label: "FREE", variant: "secondary" as const, className: "" };
-  };
+    let mounted = true;
+    fetchTrades(user.uid)
+      .then((data) => {
+        if (mounted) {
+          setTrades(data);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) setLoading(false);
+      });
 
-  const tierBadge = getTierBadge();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
+
+  const stats = useMemo(() => calculateStats(trades), [trades]);
+  const hasData = trades.length > 0;
+
+  const tierBadge = isElite
+    ? { label: "ELITE", className: "bg-gradient-to-r from-amber-500 to-yellow-400 text-black border-0" }
+    : isPro
+    ? { label: "PRO", className: "bg-gradient-to-r from-blue-500 to-cyan-400 text-white border-0" }
+    : { label: "FREE", className: "" };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -130,62 +295,126 @@ export default function AIDashboard() {
         </Badge>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="relative overflow-hidden transition-all hover:shadow-md">
-          <div className="absolute right-0 top-0 h-16 w-16 -translate-y-4 translate-x-4 rounded-full bg-primary/10" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Today&apos;s AI Usage</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground mt-1">analyses performed</p>
-          </CardContent>
-        </Card>
+      {!hasData && !loading ? (
+        <EmptyState />
+      ) : (
+        <>
+          {/* Stats Row */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              title="Total Trades"
+              value={stats.totalTrades}
+              subtitle="All time trades"
+              icon={BarChart3}
+              color="bg-primary/10"
+              loading={loading}
+            />
+            <StatCard
+              title="Net Profit"
+              value={`$${stats.netProfit.toFixed(2)}`}
+              subtitle={stats.netProfit >= 0 ? "All time profit" : "All time loss"}
+              icon={DollarSign}
+              color={stats.netProfit >= 0 ? "bg-green-500/10" : "bg-red-500/10"}
+              loading={loading}
+            />
+            <StatCard
+              title="Win Rate"
+              value={`${stats.winRate.toFixed(1)}%`}
+              subtitle={`${stats.totalTrades > 0 ? Math.round(stats.winRate * stats.totalTrades / 100) : 0} winning trades`}
+              icon={Target}
+              color="bg-blue-500/10"
+              loading={loading}
+            />
+            <StatCard
+              title="Average R:R"
+              value={stats.avgRR > 0 ? `${stats.avgRR.toFixed(2)}:1` : "N/A"}
+              subtitle="Risk to reward ratio"
+              icon={Award}
+              color="bg-purple-500/10"
+              loading={loading}
+            />
+          </div>
 
-        <Card className="relative overflow-hidden transition-all hover:shadow-md">
-          <div className="absolute right-0 top-0 h-16 w-16 -translate-y-4 translate-x-4 rounded-full bg-amber-500/10" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Remaining Credits</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{freeCredits}</div>
-            <div className="mt-2">
-              <Progress value={animatedProgress} className="h-2" />
-            </div>
-          </CardContent>
-        </Card>
+          {/* Second Stats Row */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              title="Best Pair"
+              value={stats.bestPair}
+              subtitle="Most profitable pair"
+              icon={TrendingUp}
+              color="bg-green-500/10"
+              loading={loading}
+            />
+            <StatCard
+              title="Worst Pair"
+              value={stats.worstPair}
+              subtitle="Least profitable pair"
+              icon={TrendingDown}
+              color="bg-red-500/10"
+              loading={loading}
+            />
+            <StatCard
+              title="Current Streak"
+              value={stats.currentStreak > 0 ? `${stats.currentStreak} ${stats.streakType}` : "None"}
+              subtitle="Consecutive results"
+              icon={stats.streakType === "win" ? TrendingUp : stats.streakType === "loss" ? TrendingDown : Minus}
+              color={stats.streakType === "win" ? "bg-green-500/10" : stats.streakType === "loss" ? "bg-red-500/10" : "bg-muted/50"}
+              loading={loading}
+            />
+            <StatCard
+              title="Avg Hold Time"
+              value="No data"
+              subtitle="Coming soon"
+              icon={Clock}
+              color="bg-amber-500/10"
+              loading={loading}
+            />
+          </div>
 
-        <Card className="relative overflow-hidden transition-all hover:shadow-md">
-          <div className="absolute right-0 top-0 h-16 w-16 -translate-y-4 translate-x-4 rounded-full bg-green-500/10" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Current Plan</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <Zap className="h-5 w-5 text-primary" />
-              <span className="text-xl font-bold capitalize">{tier}</span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {isElite ? "All features unlocked" : isPro ? "Most features available" : "Upgrade for more"}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="relative overflow-hidden transition-all hover:shadow-md">
-          <div className="absolute right-0 top-0 h-16 w-16 -translate-y-4 translate-x-4 rounded-full bg-purple-500/10" />
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground">AI Accuracy</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-green-500" />
-              <span className="text-2xl font-bold">84%</span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">pattern detection rate</p>
-          </CardContent>
-        </Card>
-      </div>
+          {/* Monthly Performance */}
+          {stats.monthlyPerformance.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-primary" />
+                  Monthly Performance
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {stats.monthlyPerformance.map((month) => (
+                    <div key={month.month} className="flex items-center gap-3">
+                      <span className="text-sm font-medium w-20 shrink-0">{month.month}</span>
+                      <div className="flex-1">
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all",
+                              month.profit >= 0 ? "bg-green-500" : "bg-red-500"
+                            )}
+                            style={{
+                              width: `${Math.min(100, (Math.abs(month.profit) / Math.max(...stats.monthlyPerformance.map((m) => Math.abs(m.profit)))) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span className={cn(
+                        "text-sm font-medium w-20 text-right",
+                        month.profit >= 0 ? "text-green-600" : "text-red-600"
+                      )}>
+                        ${month.profit.toFixed(0)}
+                      </span>
+                      <span className="text-xs text-muted-foreground w-16 text-right">
+                        {month.trades} trades
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
 
       {/* Quick Actions */}
       <section>
@@ -202,7 +431,7 @@ export default function AIDashboard() {
           <QuickActionCard
             icon={Mic}
             title="Voice Notes"
-            description="Record trading notes with AI transcription"
+            description="Record trading notes with transcription"
             href="/ai/voice"
             color="bg-purple-500"
             locked={!hasAccess("voiceNotes")}
@@ -218,191 +447,13 @@ export default function AIDashboard() {
           <QuickActionCard
             icon={ClipboardList}
             title="Trade Summary"
-            description="AI-generated trade performance review"
+            description="Trade performance review"
             href="/ai/summary"
             color="bg-green-500"
             locked={!hasAccess("aiTradeScore")}
           />
         </div>
       </section>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Recent AI Activity */}
-        <Card className="transition-all hover:shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Activity className="h-4 w-4 text-primary" />
-              Recent AI Activity
-            </CardTitle>
-            <Link to="/ai/screenshot" className="text-xs text-primary hover:underline">
-              View all
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {mockRecentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/50">
-                  <div className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-full",
-                    activity.type === "screenshot" && "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
-                    activity.type === "voice" && "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
-                    activity.type === "coaching" && "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400",
-                    activity.type === "summary" && "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
-                  )}>
-                    {activity.type === "screenshot" && <Camera className="h-4 w-4" />}
-                    {activity.type === "voice" && <Mic className="h-4 w-4" />}
-                    {activity.type === "coaching" && <Brain className="h-4 w-4" />}
-                    {activity.type === "summary" && <ClipboardList className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{activity.title}</p>
-                    <p className="text-xs text-muted-foreground">{activity.time}</p>
-                  </div>
-                  {activity.status === "completed" ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                  )}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Recent Screenshot Analysis */}
-        <Card className="transition-all hover:shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Camera className="h-4 w-4 text-primary" />
-              Recent Screenshot Analysis
-            </CardTitle>
-            <Link to="/ai/screenshot" className="text-xs text-primary hover:underline">
-              Analyze new
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {mockRecentScreenshots.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 rounded-lg border p-3 transition-all hover:shadow-sm">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                    <BarChart3 className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm">{s.pair}</span>
-                      <Badge variant="outline" className="text-xs">{s.timeframe}</Badge>
-                      <Badge className={cn(
-                        "text-xs",
-                        s.direction === "buy" ? "bg-green-500/10 text-green-600 hover:bg-green-500/20" : "bg-red-500/10 text-red-600 hover:bg-red-500/20"
-                      )}>
-                        {s.direction.toUpperCase()}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-muted-foreground">Confidence</span>
-                      <div className="flex-1">
-                        <Progress value={s.confidence} className="h-1.5" />
-                      </div>
-                      <span className="text-xs font-medium">{s.confidence}%</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Recent Voice Notes */}
-        <Card className="transition-all hover:shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Mic className="h-4 w-4 text-primary" />
-              Recent Voice Notes
-            </CardTitle>
-            <Link to="/ai/voice" className="text-xs text-primary hover:underline">
-              Record new
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {mockVoiceNotes.map((note) => (
-                <div key={note.id} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/50">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">
-                    <Mic className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{note.name}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {note.duration}
-                      <span>·</span>
-                      {note.date}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {!hasAccess("voiceNotes") && (
-              <div className="mt-3 flex items-center gap-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-                <Lock className="h-3.5 w-3.5" />
-                Upgrade to Pro to use Voice Notes
-                <Link to="/ai/subscription" className="ml-auto text-primary font-medium hover:underline">
-                  Upgrade
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* AI Coaching Insights */}
-        <Card className="transition-all hover:shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Brain className="h-4 w-4 text-primary" />
-              AI Coaching Insights
-            </CardTitle>
-            <Link to="/ai/coach" className="text-xs text-primary hover:underline">
-              Full report
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockCoachingInsights.map((insight) => (
-                <div key={insight.id}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium">{insight.category}</span>
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "text-xs font-bold",
-                        insight.score >= 80 ? "text-green-500" : insight.score >= 60 ? "text-amber-500" : "text-red-500"
-                      )}>
-                        {insight.score}/100
-                      </span>
-                      <TrendingUp className={cn(
-                        "h-3 w-3",
-                        insight.trend === "up" ? "text-green-500" : "text-red-500"
-                      )} />
-                    </div>
-                  </div>
-                  <Progress
-                    value={insight.score}
-                    className="h-2"
-                  />
-                </div>
-              ))}
-            </div>
-            {!hasAccess("aiCoaching") && (
-              <div className="mt-4 flex items-center gap-2 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-                <Lock className="h-3.5 w-3.5" />
-                Upgrade to Elite for AI Coaching
-                <Link to="/ai/subscription" className="ml-auto text-primary font-medium hover:underline">
-                  Upgrade
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Upgrade Banner */}
       {!isElite && (
