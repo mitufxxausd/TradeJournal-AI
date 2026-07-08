@@ -23,11 +23,8 @@ import {
   Shield,
   Award,
   Crosshair,
-  Clock,
   Zap,
   AlertTriangle,
-  ChevronUp,
-  ChevronDown,
   Sparkles,
   ImageIcon,
 } from "lucide-react";
@@ -520,7 +517,7 @@ export default function AIScreenshotAnalysis() {
                             <span className="font-bold">{image.analysis.confidenceScore}%</span>
                           </div>
                           <Progress value={image.analysis.confidenceScore} className="h-2" />
-                          <div className="flex items-center justify-between text-xs">
+                          <div className="flex-icons-center justify-between text-xs">
                             <span className="text-muted-foreground flex items-center gap-1">
                               <Award className="h-3 w-3" /> Trade Quality Score
                             </span>
