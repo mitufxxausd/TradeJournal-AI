@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import type { AIRequestOptions } from "../types/common";
 import type { TradeAnalysisRequest, TradeAnalysisResult, TradeScore } from "../types/trade-analysis";
 import type { AIResponse } from "../types/common";

@@ -4,6 +4,7 @@
 
 export { useAI } from "./useAI";
 export { useTradeAnalysis } from "./useTradeAnalysis";
+export { useTradeSummary } from "./useTradeSummary";
 export { useChartAnalysis } from "./useChartAnalysis";
 export { useOCR } from "./useOCR";
 export { useCoach } from "./useCoach";

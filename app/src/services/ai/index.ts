@@ -51,6 +51,21 @@ export { coachingService, CoachingService, CoachingError } from "./services/coac
 export { transcriptionService, TranscriptionService, TranscriptionError } from "./services/transcriptionService";
 export { summaryService, SummaryService, SummaryError } from "./services/summaryService";
 
+// ─── Utils ───
+export {
+  delay,
+  simulateProcessing,
+  generateAIId,
+  withRetry,
+  isAbortError,
+  getErrorMessage,
+  formatProcessingTime,
+  clamp,
+  randomPick,
+  randomInt,
+  randomFloat,
+} from "./utils";
+
 // ─── Config ───
 export {
   getDefaultProviderConfigs,
