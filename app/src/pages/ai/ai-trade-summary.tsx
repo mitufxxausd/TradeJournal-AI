@@ -23,7 +23,6 @@ import {
   Loader2,
   Calendar,
   BarChart3,
-  Zap,
   BookOpen,
   Star,
 } from "lucide-react";
@@ -157,7 +156,7 @@ function ScoreRing({ score, label, size = 80 }: { score: number; label: string; 
 // ─── Main Component ───
 
 export default function AITradeSummary() {
-  const { hasAccess, isElite } = useSubscription();
+  const { hasAccess } = useSubscription();
   const [isGenerating, setIsGenerating] = useState(false);
   const canAccess = hasAccess("aiTradeScore");
 
