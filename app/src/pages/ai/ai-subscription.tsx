@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { useSubscription } from "@/hooks/use-subscription";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -149,7 +148,7 @@ function FeatureRow({ name, icon: Icon, free, pro, elite }: Feature) {
 // ─── Main Component ───
 
 export default function AISubscription() {
-  const { tier, setTier, isPro, isElite } = useSubscription();
+  const { tier, setTier } = useSubscription();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly");
 
   const handleSelectPlan = (plan: "free" | "pro" | "elite") => {
@@ -160,8 +159,6 @@ export default function AISubscription() {
     setTier(plan);
     toast.success(`Switched to ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan (demo)`);
   };
-
-  const yearlyDiscount = 0.17; // ~2 months free
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
