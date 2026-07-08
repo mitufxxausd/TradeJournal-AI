@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSubscription } from "@/hooks/use-subscription";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -20,6 +21,10 @@ import {
   ChevronRight,
   Brain,
   type LucideIcon,
+  ScanText,
+  Languages,
+  ImagePlus,
+  Bot,
 } from "lucide-react";
 
 // ─── AI Provider Types ───
@@ -118,6 +123,26 @@ const featureToggles = [
   { id: "saveHistory", label: "Save AI analysis history", defaultValue: true },
 ];
 
+// ─── OCR Settings ───
+
+const ocrLanguages = [
+  { code: "eng", name: "English" },
+  { code: "deu", name: "German" },
+  { code: "fra", name: "French" },
+  { code: "spa", name: "Spanish" },
+  { code: "ita", name: "Italian" },
+  { code: "por", name: "Portuguese" },
+  { code: "rus", name: "Russian" },
+  { code: "chi_sim", name: "Chinese (Simplified)" },
+  { code: "chi_tra", name: "Chinese (Traditional)" },
+  { code: "jpn", name: "Japanese" },
+  { code: "kor", name: "Korean" },
+  { code: "ara", name: "Arabic" },
+  { code: "tur", name: "Turkish" },
+  { code: "nld", name: "Dutch" },
+  { code: "pol", name: "Polish" },
+];
+
 // ─── Main Component ───
 
 export default function AISettings() {
@@ -126,6 +151,18 @@ export default function AISettings() {
   const [toggles, setToggles] = useState<Record<string, boolean>>(
     Object.fromEntries(featureToggles.map((f) => [f.id, f.defaultValue]))
   );
+  const [ocrLanguage, setOcrLanguage] = useState(() => {
+    return localStorage.getItem("tj_ocr_language") || "eng";
+  });
+  const [ocrQuality, setOcrQuality] = useState<"low" | "medium" | "high">(() => {
+    return (localStorage.getItem("tj_ocr_quality") as "low" | "medium" | "high") || "medium";
+  });
+  const [ocrAutoFill, setOcrAutoFill] = useState(() => {
+    return localStorage.getItem("tj_ocr_autofill") !== "false";
+  });
+  const [ocrAutoAnalyze, setOcrAutoAnalyze] = useState(() => {
+    return localStorage.getItem("tj_ocr_autoanalyze") === "true";
+  });
 
   const handleToggle = (id: string) => {
     setToggles((prev) => {
@@ -147,6 +184,37 @@ export default function AISettings() {
 
   const handleRefresh = () => {
     toast.success("AI configuration refreshed");
+  };
+
+  const handleOcrLanguageChange = (value: string) => {
+    setOcrLanguage(value);
+    localStorage.setItem("tj_ocr_language", value);
+    toast.success(`OCR language set to ${ocrLanguages.find((l) => l.code === value)?.name || value}`);
+  };
+
+  const handleOcrQualityChange = (value: "low" | "medium" | "high") => {
+    setOcrQuality(value);
+    localStorage.setItem("tj_ocr_quality", value);
+    toast.success(`OCR image quality set to ${value}`);
+  };
+
+  const handleOcrAutoFillChange = (checked: boolean) => {
+    setOcrAutoFill(checked);
+    localStorage.setItem("tj_ocr_autofill", String(checked));
+    toast.success(`Auto Fill ${checked ? "enabled" : "disabled"}`);
+  };
+
+  const handleOcrAutoAnalyzeChange = (checked: boolean) => {
+    setOcrAutoAnalyze(checked);
+    localStorage.setItem("tj_ocr_autoanalyze", String(checked));
+    toast.success(`Auto Analyze ${checked ? "enabled" : "disabled"}`);
+  };
+
+  const handleClearVoiceNotes = () => {
+    if (confirm("Are you sure you want to delete all voice notes? This cannot be undone.")) {
+      localStorage.removeItem("tradejournal_voice_notes");
+      toast.success("All voice notes cleared");
+    }
   };
 
   return (
@@ -257,6 +325,93 @@ export default function AISettings() {
 
       <Separator />
 
+      {/* OCR Settings */}
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <ScanText className="h-5 w-5 text-primary" />
+          OCR Settings
+        </h2>
+        <Card>
+          <CardContent className="p-0 divide-y">
+            {/* OCR Language */}
+            <div className="p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Languages className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium text-sm">OCR Language</p>
+                    <p className="text-xs text-muted-foreground">Language used for text recognition in screenshots</p>
+                  </div>
+                </div>
+                <Select value={ocrLanguage} onValueChange={handleOcrLanguageChange}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ocrLanguages.map((lang) => (
+                      <SelectItem key={lang.code} value={lang.code}>{lang.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Image Quality */}
+            <div className="p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium text-sm">Image Processing Quality</p>
+                    <p className="text-xs text-muted-foreground">Higher quality is slower but more accurate</p>
+                  </div>
+                </div>
+                <Select value={ocrQuality} onValueChange={(v) => handleOcrQualityChange(v as "low" | "medium" | "high")}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low (Fast)</SelectItem>
+                    <SelectItem value="medium">Medium (Balanced)</SelectItem>
+                    <SelectItem value="high">High (Accurate)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Auto Fill */}
+            <div className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Bot className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium text-sm">Auto Fill Trade</p>
+                    <p className="text-xs text-muted-foreground">After OCR, show &quot;Auto Fill Trade&quot; button to populate Add Trade form</p>
+                  </div>
+                </div>
+                <Switch checked={ocrAutoFill} onCheckedChange={handleOcrAutoFillChange} />
+              </div>
+            </div>
+
+            {/* Auto Analyze */}
+            <div className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <ScanText className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium text-sm">Auto Analyze on Upload</p>
+                    <p className="text-xs text-muted-foreground">Automatically run OCR when screenshots are uploaded</p>
+                  </div>
+                </div>
+                <Switch checked={ocrAutoAnalyze} onCheckedChange={handleOcrAutoAnalyzeChange} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Separator />
+
       {/* Feature Toggles */}
       <section>
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -313,6 +468,20 @@ export default function AISettings() {
                 </div>
                 <Button variant="outline" size="sm" onClick={() => toast.info("Export started")}>
                   Export
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium">Clear Voice Notes</h3>
+                  <p className="text-sm text-muted-foreground">Delete all locally stored voice recordings</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleClearVoiceNotes}>
+                  Clear
                 </Button>
               </div>
             </CardContent>
