@@ -6,6 +6,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router";
+import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -278,6 +279,7 @@ export default function AIDashboard() {
     : { label: "FREE", className: "" };
 
   return (
+    <AppLayout>
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -475,5 +477,6 @@ export default function AIDashboard() {
         </Card>
       )}
     </div>
+    </AppLayout>
   );
 }
