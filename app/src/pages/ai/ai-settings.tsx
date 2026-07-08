@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import {
   Cpu,
   CheckCircle2,
-  XCircle,
   Sparkles,
   Lock,
   RefreshCw,
@@ -146,7 +145,7 @@ const ocrLanguages = [
 // ─── Main Component ───
 
 export default function AISettings() {
-  const { setTier } = useSubscription();
+  useSubscription();
   const [activeProvider, setActiveProvider] = useState("mock");
   const [toggles, setToggles] = useState<Record<string, boolean>>(
     Object.fromEntries(featureToggles.map((f) => [f.id, f.defaultValue]))
