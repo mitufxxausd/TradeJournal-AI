@@ -1,65 +1,67 @@
 /**
- * Tesseract OCR Service
- * Real OCR using Tesseract.js for extracting text and trade data from screenshots.
- * Supports MT4, MT5, TradingView screenshots with confidence scores.
+ * Tesseract OCR Provider
+ * Implements the OCRProvider interface using Tesseract.js.
+ * Supports lazy loading of the Tesseract engine for better performance.
  */
 
-import Tesseract from "tesseract.js";
+import type { OCROptions, OCRResult } from "./types";
+import { parseOCRText, cleanOCRText } from "./parser";
 
-// ─── Types ───
+// ─── Lazy-loaded Tesseract module ───
 
-export interface OCRTrade {
-  symbol: string;
-  direction: "buy" | "sell" | "unknown";
-  entryPrice: number | null;
-  stopLoss: number | null;
-  takeProfit: number[];
-  positionSize: number | null;
-  riskReward: number | null;
-  confidence: number;
-  rawText: string;
+let TesseractModule: typeof import("tesseract.js") | null = null;
+let tesseractLoadPromise: Promise<typeof import("tesseract.js")> | null = null;
+
+/**
+ * Lazy load Tesseract.js only when needed.
+ * Prevents unnecessary bundle loading on app startup.
+ */
+async function getTesseract(): Promise<typeof import("tesseract.js")> {
+  if (TesseractModule) {
+    return TesseractModule;
+  }
+
+  if (tesseractLoadPromise) {
+    return tesseractLoadPromise;
+  }
+
+  tesseractLoadPromise = import("tesseract.js").then((mod) => {
+    TesseractModule = mod;
+    return mod;
+  });
+
+  return tesseractLoadPromise;
 }
 
-export interface OCROptions {
-  language?: string;
-  imageQuality?: "low" | "medium" | "high";
-  onProgress?: (progress: number) => void;
+/**
+ * Preload Tesseract.js in the background.
+ * Call this when navigating to the screenshot analysis page.
+ */
+export function preloadTesseract(): void {
+  if (!TesseractModule && !tesseractLoadPromise) {
+    tesseractLoadPromise = import("tesseract.js").then((mod) => {
+      TesseractModule = mod;
+      return mod;
+    });
+  }
 }
-
-export interface OCRResult {
-  rawText: string;
-  trades: OCRTrade[];
-  detectedPrices: number[];
-  detectedOrderTypes: string[];
-  overallConfidence: number;
-  processingTimeMs: number;
-  error?: string;
-}
-
-// ─── Constants ───
-
-const TRADING_PAIRS = [
-  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
-  "EURGBP", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY", "EURAUD",
-  "EURCAD", "EURCHF", "GBPAUD", "GBPCAD", "GBPCHF", "AUDCAD", "AUDCHF",
-  "AUDNZD", "CADCHF", "EURNZD", "GBPNZD", "NZDCAD", "NZDCHF", "NZDJPY",
-  "XAUUSD", "XAGUSD", "US30", "US100", "DE40", "UK100", "JP225",
-  "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD", "BNBUSD", "SOLUSD",
-  "CRUDEOIL", "BRENT", "NATGAS",
-  "USOIL", "UKOIL", "GER40", "NAS100", "SPX500",
-];
-
-const DIRECTION_WORDS: Record<string, "buy" | "sell"> = {
-  "buy": "buy", "long": "buy", "bullish": "buy",
-  "sell": "sell", "short": "sell", "bearish": "sell",
-};
 
 // ─── Image Preprocessing ───
 
+interface PreprocessResult {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
 /**
- * Compress and preprocess image before OCR
+ * Compress and preprocess image before OCR for better accuracy.
+ * Applies contrast enhancement for dark mode screenshots.
  */
-async function preprocessImage(imageFile: File, quality: "low" | "medium" | "high" = "medium"): Promise<string> {
+async function preprocessImage(
+  imageFile: File,
+  quality: "low" | "medium" | "high" = "medium"
+): Promise<PreprocessResult> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(imageFile);
@@ -88,20 +90,41 @@ async function preprocessImage(imageFile: File, quality: "low" | "medium" | "hig
       const ctx = canvas.getContext("2d");
 
       if (!ctx) {
-        // Fallback: use original file
+        // Fallback: use original file as data URL
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
+        reader.onload = () =>
+          resolve({
+            dataUrl: reader.result as string,
+            width: img.width,
+            height: img.height,
+          });
         reader.onerror = reject;
         reader.readAsDataURL(imageFile);
         return;
       }
 
-      // Draw and apply subtle contrast enhancement for dark mode screenshots
+      // White background for better OCR on dark screenshots
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
 
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
+      // Apply subtle contrast enhancement
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        // Increase contrast slightly
+        const factor = 1.1;
+        data[i] = Math.min(255, ((data[i] - 128) * factor + 128));
+        data[i + 1] = Math.min(255, ((data[i + 1] - 128) * factor + 128));
+        data[i + 2] = Math.min(255, ((data[i + 2] - 128) * factor + 128));
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      resolve({
+        dataUrl: canvas.toDataURL("image/jpeg", 0.92),
+        width,
+        height,
+      });
     };
 
     img.onerror = () => {
@@ -116,34 +139,43 @@ async function preprocessImage(imageFile: File, quality: "low" | "medium" | "hig
 // ─── Text Extraction ───
 
 /**
- * Extract all text from an image using Tesseract.js
+ * Extract raw text from an image using Tesseract.js.
+ * This is the low-level OCR function that just returns text.
  */
 export async function extractTextFromImage(
   imageFile: File,
   options: OCROptions = {}
-): Promise<{ text: string; confidence: number; processingTimeMs: number }> {
+): Promise<{
+  text: string;
+  confidence: number;
+  processingTimeMs: number;
+}> {
   const { language = "eng", imageQuality = "medium", onProgress } = options;
   const startTime = Date.now();
 
   try {
-    const processedImage = await preprocessImage(imageFile, imageQuality);
+    // Lazy load Tesseract
+    const Tesseract = await getTesseract();
 
-    const result = await Tesseract.recognize(
-      processedImage,
-      language,
-      {
-        logger: (m) => {
-          if (m.status === "recognizing text" && onProgress) {
-            onProgress(Math.round(m.progress * 100));
-          }
-        },
-      }
-    );
+    // Preprocess image
+    const { dataUrl } = await preprocessImage(imageFile, imageQuality);
+
+    // Run OCR
+    const result = await Tesseract.recognize(dataUrl, language, {
+      logger: (m: { status: string; progress: number }) => {
+        if (m.status === "recognizing text" && onProgress) {
+          onProgress(Math.round(m.progress * 100));
+        }
+      },
+    });
 
     const processingTimeMs = Date.now() - startTime;
 
+    // Clean the OCR text
+    const cleanedText = cleanOCRText(result.data.text);
+
     return {
-      text: result.data.text,
+      text: cleanedText,
       confidence: result.data.confidence,
       processingTimeMs,
     };
@@ -153,243 +185,11 @@ export async function extractTextFromImage(
   }
 }
 
-// ─── Trade Data Extraction ───
-
-/**
- * Extract trading pair from text
- */
-function extractSymbol(text: string): { symbol: string; confidence: number } {
-  const upperText = text.toUpperCase();
-
-  for (const pair of TRADING_PAIRS) {
-    // Match as whole word or with common separators
-    const regex = new RegExp(`\\b${pair}\\b|[/_]${pair}\\b|\\b${pair}[/_]`);
-    if (upperText.includes(pair) || regex.test(upperText)) {
-      return { symbol: pair, confidence: 0.9 };
-    }
-  }
-
-  // Try to find any 6-letter combination that looks like a forex pair
-  const forexPattern = /\b([A-Z]{3})[/\-_]?([A-Z]{3})\b/;
-  const match = upperText.match(forexPattern);
-  if (match) {
-    return { symbol: `${match[1]}${match[2]}`, confidence: 0.6 };
-  }
-
-  // Check for crypto pairs
-  const cryptoPattern = /\b(BTC|ETH|XRP|LTC|BNB|SOL)[/\-_]?(USD|USDT|USDC|EUR)\b/i;
-  const cryptoMatch = text.match(cryptoPattern);
-  if (cryptoMatch) {
-    return { symbol: `${cryptoMatch[1].toUpperCase()}${cryptoMatch[2].toUpperCase()}`, confidence: 0.85 };
-  }
-
-  return { symbol: "Unknown", confidence: 0 };
-}
-
-/**
- * Extract direction (buy/sell) from text
- */
-function extractDirection(text: string): { direction: "buy" | "sell" | "unknown"; confidence: number } {
-  const lowerText = text.toLowerCase();
-
-  let buyCount = 0;
-  let sellCount = 0;
-
-  for (const [word, dir] of Object.entries(DIRECTION_WORDS)) {
-    const regex = new RegExp(`\\b${word}\\b`, "gi");
-    const matches = lowerText.match(regex);
-    if (matches) {
-      if (dir === "buy") buyCount += matches.length;
-      else sellCount += matches.length;
-    }
-  }
-
-  if (buyCount > 0 && sellCount === 0) {
-    return { direction: "buy", confidence: Math.min(0.9, 0.5 + buyCount * 0.1) };
-  }
-  if (sellCount > 0 && buyCount === 0) {
-    return { direction: "sell", confidence: Math.min(0.9, 0.5 + sellCount * 0.1) };
-  }
-  if (buyCount > 0 && sellCount > 0) {
-    // Ambiguous - return the one with more mentions
-    return buyCount > sellCount
-      ? { direction: "buy", confidence: 0.4 }
-      : { direction: "sell", confidence: 0.4 };
-  }
-
-  return { direction: "unknown", confidence: 0 };
-}
-
-/**
- * Extract all numeric prices from text
- */
-function extractPrices(text: string): number[] {
-  const prices: number[] = [];
-  const seen = new Set<number>();
-
-  // Match decimal numbers (common price formats)
-  const pricePatterns = [
-    /\b(\d{1,5}\.\d{2,5})\b/g,       // e.g., 1.23456, 123.45
-    /\b(\d{4,6}\.\d{2})\b/g,          // e.g., 4541.63
-    /\b(\d{2,3},\d{3}\.\d{2})\b/g,    // e.g., 12,345.67
-    /\b(\d{5,6})\b/g,                 // e.g., 100000 (for JPY pairs)
-  ];
-
-  for (const pattern of pricePatterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      const price = parseFloat(match[1].replace(",", ""));
-      if (!isNaN(price) && price > 0 && !seen.has(price)) {
-        prices.push(price);
-        seen.add(price);
-      }
-    }
-  }
-
-  return prices.sort((a, b) => a - b);
-}
-
-/**
- * Detect if text contains multiple positions/trades
- */
-function detectMultipleTrades(text: string): { count: number; segments: string[] } {
-  const lines = text.split(/\n/).filter((l) => l.trim().length > 0);
-
-  // Look for position identifiers
-  const positionPatterns = [
-    /\b(?:position|trade|order)\s*#?\s*(\d+)/gi,
-    /\b(#\d+|no\.?\s*\d+|ticket\s*\d+)\b/gi,
-  ];
-
-  let matchCount = 0;
-  for (const pattern of positionPatterns) {
-    const matches = text.match(pattern);
-    if (matches) matchCount = Math.max(matchCount, matches.length);
-  }
-
-  // If we have clear position markers, try to segment
-  if (matchCount >= 2) {
-    // Split by ticket/position numbers
-    const segments = text.split(/(?=\b(?:ticket|position|trade|order)\s*#?\s*\d+)/gi)
-      .filter((s) => s.trim().length > 10);
-    return { count: segments.length || matchCount, segments };
-  }
-
-  // Check if there are multiple SELL/BUY keywords separated by lines
-  const directionLines = lines.filter((l) =>
-    /\b(buy|sell|long|short)\b/i.test(l)
-  );
-
-  if (directionLines.length >= 2) {
-    return { count: directionLines.length, segments: lines };
-  }
-
-  return { count: 1, segments: [text] };
-}
-
-/**
- * Parse a trade segment into structured trade data
- */
-function parseTradeSegment(segment: string, allPrices: number[]): OCRTrade {
-  const symbolResult = extractSymbol(segment);
-  const directionResult = extractDirection(segment);
-  const prices = extractPrices(segment);
-
-  // Combine with all prices found if segment has few prices
-  const combinedPrices = prices.length >= 2 ? prices : allPrices.length >= 2 ? allPrices : prices;
-
-  // Assign prices based on direction and typical trade structure
-  let entryPrice: number | null = null;
-  let stopLoss: number | null = null;
-  let takeProfits: number[] = [];
-
-  if (combinedPrices.length >= 2) {
-    if (directionResult.direction === "buy") {
-      // For buy: entry is lowest, SL below entry, TP above entry
-      entryPrice = combinedPrices[0];
-      stopLoss = combinedPrices.find((p) => p < entryPrice!) ?? null;
-      takeProfits = combinedPrices.filter((p) => p > entryPrice!);
-    } else if (directionResult.direction === "sell") {
-      // For sell: entry is highest, SL above entry, TP below entry
-      entryPrice = combinedPrices[combinedPrices.length - 1];
-      stopLoss = combinedPrices.find((p) => p > entryPrice!) ?? null;
-      takeProfits = combinedPrices.filter((p) => p < entryPrice!).reverse();
-    } else {
-      // Unknown direction - just take first as entry
-      entryPrice = combinedPrices[0];
-      if (combinedPrices.length > 1) {
-        stopLoss = combinedPrices[1];
-      }
-      if (combinedPrices.length > 2) {
-        takeProfits = combinedPrices.slice(2);
-      }
-    }
-  } else if (combinedPrices.length === 1) {
-    entryPrice = combinedPrices[0];
-  }
-
-  // Extract position size / lot size
-  let positionSize: number | null = null;
-  const lotMatch = segment.match(/(\d+\.?\d*)\s*(lots?|lot)/i);
-  if (lotMatch) {
-    positionSize = parseFloat(lotMatch[1]);
-  }
-
-  // Calculate R:R if we have SL and TP
-  let riskReward: number | null = null;
-  if (entryPrice && stopLoss && takeProfits.length > 0) {
-    const risk = Math.abs(entryPrice - stopLoss);
-    const reward = Math.abs(takeProfits[0] - entryPrice);
-    if (risk > 0) {
-      riskReward = parseFloat((reward / risk).toFixed(2));
-    }
-  }
-
-  // Calculate confidence as average of detected field confidences
-  const confidences: number[] = [];
-  if (symbolResult.confidence > 0) confidences.push(symbolResult.confidence);
-  if (directionResult.confidence > 0) confidences.push(directionResult.confidence);
-  if (entryPrice !== null) confidences.push(0.8);
-  if (stopLoss !== null) confidences.push(0.7);
-  if (takeProfits.length > 0) confidences.push(0.7);
-
-  const overallConfidence = confidences.length > 0
-    ? parseFloat((confidences.reduce((a, b) => a + b, 0) / confidences.length * 100).toFixed(1))
-    : 0;
-
-  return {
-    symbol: symbolResult.symbol,
-    direction: directionResult.direction,
-    entryPrice,
-    stopLoss,
-    takeProfit: takeProfits,
-    positionSize,
-    riskReward,
-    confidence: overallConfidence,
-    rawText: segment.trim(),
-  };
-}
-
-/**
- * Extract order types found in text
- */
-function extractOrderTypes(text: string): string[] {
-  const types: string[] = [];
-  const orderKeywords = ["market", "limit", "stop", "stop loss", "take profit", "pending", "buy stop", "sell stop", "buy limit", "sell limit"];
-
-  for (const keyword of orderKeywords) {
-    if (new RegExp(`\\b${keyword}\\b`, "i").test(text)) {
-      types.push(keyword);
-    }
-  }
-
-  return types;
-}
-
 // ─── Main OCR Function ───
 
 /**
- * Run full OCR and trade extraction on an image
+ * Run full OCR and trade extraction on an image.
+ * Uses the intelligent parser layer for trade data extraction.
  */
 export async function runOCR(
   imageFile: File,
@@ -398,7 +198,11 @@ export async function runOCR(
   const startTime = Date.now();
 
   try {
-    const { text, confidence: ocrConfidence } = await extractTextFromImage(imageFile, options);
+    // Step 1: Extract raw text using Tesseract
+    const { text, confidence: ocrConfidence } = await extractTextFromImage(
+      imageFile,
+      options
+    );
 
     if (!text || text.trim().length === 0) {
       return {
@@ -407,43 +211,18 @@ export async function runOCR(
         detectedPrices: [],
         detectedOrderTypes: [],
         overallConfidence: 0,
+        confidenceLevel: "low",
         processingTimeMs: Date.now() - startTime,
         error: "No text detected in image",
       };
     }
 
-    // Detect multiple trades
-    const { count, segments } = detectMultipleTrades(text);
-    const allPrices = extractPrices(text);
-
-    // Parse each trade
-    const trades: OCRTrade[] = [];
-    if (count > 1 && segments.length > 1) {
-      for (const segment of segments) {
-        if (segment.trim().length > 5) {
-          const trade = parseTradeSegment(segment, allPrices);
-          if (trade.symbol !== "Unknown" || trade.entryPrice !== null) {
-            trades.push(trade);
-          }
-        }
-      }
-    }
-
-    // If no trades parsed from segments, parse the whole text
-    if (trades.length === 0) {
-      trades.push(parseTradeSegment(text, allPrices));
-    }
-
-    const orderTypes = extractOrderTypes(text);
-    const processingTimeMs = Date.now() - startTime;
+    // Step 2: Parse the text using the intelligent parser
+    const parseResult = parseOCRText(text, ocrConfidence);
 
     return {
-      rawText: text,
-      trades,
-      detectedPrices: allPrices,
-      detectedOrderTypes: orderTypes,
-      overallConfidence: parseFloat(ocrConfidence.toFixed(1)),
-      processingTimeMs,
+      ...parseResult,
+      processingTimeMs: Date.now() - startTime,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown OCR error";
@@ -453,22 +232,27 @@ export async function runOCR(
       detectedPrices: [],
       detectedOrderTypes: [],
       overallConfidence: 0,
+      confidenceLevel: "low",
       processingTimeMs: Date.now() - startTime,
       error: message,
     };
   }
 }
 
+// ─── Utility Functions ───
+
 /**
- * Cancel ongoing OCR (best effort - Tesseract doesn't fully support cancellation)
+ * Cancel ongoing OCR processing.
+ * Note: Tesseract.js doesn't fully support cancellation,
+ * so this is a best-effort implementation.
  */
 export function cancelOCR(): void {
   // Tesseract.js worker termination happens automatically
-  // Future: implement worker pool management for cancellation
+  // Future: implement AbortController for true cancellation
 }
 
 /**
- * Get available OCR languages
+ * Get list of available OCR languages.
  */
 export function getOCRLanguages(): { code: string; name: string }[] {
   return [
