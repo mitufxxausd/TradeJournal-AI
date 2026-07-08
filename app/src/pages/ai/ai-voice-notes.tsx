@@ -17,7 +17,6 @@ import {
   Clock,
   Calendar,
   Sparkles,
-  Loader2,
   Info,
 } from "lucide-react";
 
@@ -62,7 +61,7 @@ export default function AIVoiceNotes() {
   const { hasAccess } = useSubscription();
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "paused">("idle");
   const [recordingTime, setRecordingTime] = useState(0);
-  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  const [expandedNote, setExpandedNote] = useState<string | null>(null);
   const [playingNote, setPlayingNote] = useState<string | null>(null);
 
   const canAccess = hasAccess("voiceNotes");
@@ -229,8 +228,9 @@ export default function AIVoiceNotes() {
             key={note.id}
             className={cn(
               "transition-all hover:shadow-md",
-              selectedNote === note.id && "border-primary/50 ring-1 ring-primary/20"
+              expandedNote === note.id && "border-primary/50 ring-1 ring-primary/20"
             )}
+            onClick={() => setExpandedNote(expandedNote === note.id ? null : note.id)}
           >
             <CardContent className="p-4">
               <div className="flex items-center gap-4">
@@ -242,7 +242,10 @@ export default function AIVoiceNotes() {
                     "h-10 w-10 rounded-full shrink-0",
                     playingNote === note.id && "bg-primary text-primary-foreground"
                   )}
-                  onClick={() => togglePlayback(note.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePlayback(note.id);
+                  }}
                 >
                   {playingNote === note.id ? (
                     <Pause className="h-4 w-4" />
@@ -280,7 +283,10 @@ export default function AIVoiceNotes() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground"
-                    onClick={() => renameNote(note.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      renameNote(note.id);
+                    }}
                   >
                     <Pencil className="h-4 w-4" />
                   </Button>
@@ -288,15 +294,18 @@ export default function AIVoiceNotes() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                    onClick={() => deleteNote(note.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteNote(note.id);
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
-              {/* Transcript Panel (shown when selected) */}
-              {selectedNote === note.id && note.transcribed && (
+              {/* Transcript Panel (shown when expanded) */}
+              {expandedNote === note.id && note.transcribed && (
                 <div className="mt-4 pt-4 border-t animate-in fade-in slide-in-from-top-2 duration-300">
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                     Transcript
