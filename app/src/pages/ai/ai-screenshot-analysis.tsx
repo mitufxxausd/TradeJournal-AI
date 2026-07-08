@@ -1,8 +1,9 @@
 /**
  * AI Screenshot Analysis Page
- * Real OCR using Tesseract.js for extracting text and trade data from screenshots.
- * Supports MT4, MT5, TradingView screenshots with confidence scores.
- * Shows detected text, prices, and order types only - no market structure guessing.
+ * Real OCR using Tesseract.js for extracting trade data from screenshots.
+ * Extracts only: Symbol, Direction, Entry, SL, TP, Lot Size, Profit, Timeframe.
+ * Groups OCR into separate trades with Confirm/Edit/Discard flow.
+ * Ignores: Price scale, Indicator values, Candle prices, Watermark text.
  */
 
 import { useState, useRef, useCallback } from "react";
@@ -11,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useOCR } from "@/hooks/use-ocr";
 import type { OCRResult } from "@/services/ocr";
@@ -34,10 +37,12 @@ import {
   ImageIcon,
   AlertTriangle,
   FileText,
-  BarChart3,
   Eye,
   ChevronDown,
   ChevronUp,
+  Check,
+  Pencil,
+  XCircle,
   Plus,
 } from "lucide-react";
 
@@ -49,6 +54,19 @@ interface UploadedImage {
   preview: string;
   ocrResult: OCRResult | null;
   status: "ready" | "processing" | "completed" | "error";
+}
+
+interface ConfirmedTrade {
+  id: string;
+  symbol: string;
+  direction: "buy" | "sell" | "unknown";
+  entryPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number[];
+  positionSize: number | null;
+  confidence: number;
+  confirmed: boolean;
+  discarded: boolean;
 }
 
 // ─── Feature Gate ───
@@ -71,6 +89,90 @@ function LockedFeature() {
   );
 }
 
+// ─── Trade Editor ───
+
+function TradeEditor({
+  trade,
+  onUpdate,
+}: {
+  trade: ConfirmedTrade;
+  onUpdate: (trade: ConfirmedTrade) => void;
+}) {
+  return (
+    <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Symbol</Label>
+          <Input
+            value={trade.symbol}
+            onChange={(e) => onUpdate({ ...trade, symbol: e.target.value.toUpperCase() })}
+            className="h-8 text-sm font-mono"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Direction</Label>
+          <select
+            value={trade.direction}
+            onChange={(e) => onUpdate({ ...trade, direction: e.target.value as "buy" | "sell" | "unknown" })}
+            className="h-8 text-sm w-full rounded-md border border-input bg-background px-3"
+          >
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Entry Price</Label>
+          <Input
+            type="number"
+            step="0.00001"
+            value={trade.entryPrice ?? ""}
+            onChange={(e) => onUpdate({ ...trade, entryPrice: e.target.value ? parseFloat(e.target.value) : null })}
+            className="h-8 text-sm font-mono"
+            placeholder="0.00000"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Stop Loss</Label>
+          <Input
+            type="number"
+            step="0.00001"
+            value={trade.stopLoss ?? ""}
+            onChange={(e) => onUpdate({ ...trade, stopLoss: e.target.value ? parseFloat(e.target.value) : null })}
+            className="h-8 text-sm font-mono"
+            placeholder="0.00000"
+          />
+        </div>
+        <div className="space-y-1 col-span-2">
+          <Label className="text-xs">Take Profit (comma-separated)</Label>
+          <Input
+            value={trade.takeProfit.join(", ")}
+            onChange={(e) =>
+              onUpdate({
+                ...trade,
+                takeProfit: e.target.value.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v)),
+              })
+            }
+            className="h-8 text-sm font-mono"
+            placeholder="1.23456, 1.24500"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Position Size (Lots)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            value={trade.positionSize ?? ""}
+            onChange={(e) => onUpdate({ ...trade, positionSize: e.target.value ? parseFloat(e.target.value) : null })}
+            className="h-8 text-sm font-mono"
+            placeholder="0.10"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ───
 
 export default function AIScreenshotAnalysis() {
@@ -81,6 +183,8 @@ export default function AIScreenshotAnalysis() {
   const [isDragging, setIsDragging] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [expandedText, setExpandedText] = useState<string | null>(null);
+  const [confirmedTrades, setConfirmedTrades] = useState<Record<string, ConfirmedTrade[]>>({});
+  const [editingTrade, setEditingTrade] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canAccess = hasAccess("aiScreenshotAnalysis");
@@ -134,6 +238,11 @@ export default function AIScreenshotAnalysis() {
       if (img) URL.revokeObjectURL(img.preview);
       return prev.filter((i) => i.id !== id);
     });
+    setConfirmedTrades((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     toast.info("Image removed");
   };
 
@@ -150,7 +259,22 @@ export default function AIScreenshotAnalysis() {
         prev.map((i) => (i.id === id ? { ...i, status: "completed", ocrResult: result } : i))
       );
 
+      // Initialize confirmed trades from OCR result
       if (result.trades.length > 0) {
+        const initialTrades: ConfirmedTrade[] = result.trades.map((trade, idx) => ({
+          id: `${id}_trade_${idx}`,
+          symbol: trade.symbol,
+          direction: trade.direction,
+          entryPrice: trade.entryPrice,
+          stopLoss: trade.stopLoss,
+          takeProfit: trade.takeProfit,
+          positionSize: trade.positionSize,
+          confidence: trade.confidence,
+          confirmed: false,
+          discarded: false,
+        }));
+        setConfirmedTrades((prev) => ({ ...prev, [id]: initialTrades }));
+
         const tradeCount = result.trades.length;
         toast.success(
           `OCR complete: ${tradeCount} trade${tradeCount > 1 ? "s" : ""} detected (${result.overallConfidence}% confidence)`
@@ -173,12 +297,40 @@ export default function AIScreenshotAnalysis() {
     }
   };
 
-  const handleAutoFill = (tradeIndex: number, image: UploadedImage) => {
-    if (!image.ocrResult?.trades[tradeIndex]) return;
+  const handleConfirmTrade = (imageId: string, tradeId: string) => {
+    setConfirmedTrades((prev) => ({
+      ...prev,
+      [imageId]: prev[imageId]?.map((t) => (t.id === tradeId ? { ...t, confirmed: true, discarded: false } : t)) || [],
+    }));
+    toast.success("Trade confirmed");
+  };
 
-    const trade = image.ocrResult.trades[tradeIndex];
+  const handleDiscardTrade = (imageId: string, tradeId: string) => {
+    setConfirmedTrades((prev) => ({
+      ...prev,
+      [imageId]: prev[imageId]?.map((t) => (t.id === tradeId ? { ...t, discarded: true, confirmed: false } : t)) || [],
+    }));
+    toast.info("Trade discarded");
+  };
 
-    // Build query params for AddTrade page
+  const handleEditTrade = (tradeId: string) => {
+    setEditingTrade((prev) => (prev === tradeId ? null : tradeId));
+  };
+
+  const handleUpdateTrade = (imageId: string, updatedTrade: ConfirmedTrade) => {
+    setConfirmedTrades((prev) => ({
+      ...prev,
+      [imageId]: prev[imageId]?.map((t) => (t.id === updatedTrade.id ? updatedTrade : t)) || [],
+    }));
+  };
+
+  const handleAutoFill = (imageId: string, tradeId: string) => {
+    const trade = confirmedTrades[imageId]?.find((t) => t.id === tradeId);
+    if (!trade || trade.symbol === "Unknown" && trade.entryPrice === null) {
+      toast.warning("No valid trade data to fill");
+      return;
+    }
+
     const params = new URLSearchParams();
     if (trade.symbol !== "Unknown") params.set("pair", trade.symbol);
     if (trade.direction !== "unknown") params.set("direction", trade.direction.toUpperCase());
@@ -186,11 +338,19 @@ export default function AIScreenshotAnalysis() {
     if (trade.stopLoss !== null) params.set("stopLoss", String(trade.stopLoss));
     if (trade.takeProfit.length > 0) params.set("takeProfit", String(trade.takeProfit[0]));
     if (trade.positionSize !== null) params.set("positionSize", String(trade.positionSize));
-    if (trade.riskReward !== null) params.set("rrRatio", String(trade.riskReward));
 
-    // Navigate to add trade page with params
     window.location.hash = `#/trades/new?${params.toString()}`;
     toast.success("Opening Add Trade form with extracted data");
+  };
+
+  const handleAutoFillAllConfirmed = (imageId: string) => {
+    const trades = confirmedTrades[imageId]?.filter((t) => t.confirmed && !t.discarded) || [];
+    if (trades.length === 0) {
+      toast.warning("No confirmed trades to fill");
+      return;
+    }
+    // For now, fill the first confirmed trade
+    handleAutoFill(imageId, trades[0].id);
   };
 
   if (!canAccess) {
@@ -218,7 +378,7 @@ export default function AIScreenshotAnalysis() {
             Screenshot Analysis
           </h1>
           <p className="mt-1 text-muted-foreground">
-            Upload trading screenshots for OCR-powered text and trade extraction
+            Upload trading screenshots for OCR-powered trade extraction
           </p>
         </div>
         {images.some((i) => i.status === "ready") && (
@@ -236,8 +396,8 @@ export default function AIScreenshotAnalysis() {
           <h4 className="font-semibold text-sm text-blue-700 dark:text-blue-400">OCR-Powered Analysis</h4>
           <p className="text-sm text-muted-foreground mt-1">
             This tool extracts text from your screenshots using Tesseract.js OCR.
-            It detects trading pairs, prices, and order types with confidence scores.
-            No market structure is guessed - only detected text is shown.
+            It detects symbol, direction, entry, stop loss, take profit, and lot size.
+            Price scales, indicator values, and watermarks are ignored.
           </p>
         </div>
       </div>
@@ -297,286 +457,331 @@ export default function AIScreenshotAnalysis() {
           )}
 
           <div className="space-y-4">
-            {images.map((image) => (
-              <Card key={image.id} className="overflow-hidden transition-all hover:shadow-md">
-                <div className="grid md:grid-cols-[300px_1fr]">
-                  {/* Image Preview */}
-                  <div className="relative group bg-muted">
-                    <img
-                      src={image.preview}
-                      alt="Screenshot"
-                      className="h-52 md:h-full w-full object-cover cursor-pointer"
-                      onClick={() => setFullscreenImage(image.preview)}
-                    />
-                    {/* Overlay actions */}
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="icon"
-                        className="h-9 w-9"
-                        onClick={() => setFullscreenImage(image.preview)}
-                      >
-                        <Maximize2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="h-9 w-9"
-                        onClick={() => removeImage(image.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {/* Status badge */}
-                    <div className="absolute top-2 left-2">
-                      {image.status === "processing" && (
-                        <Badge variant="secondary" className="gap-1">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          OCR Processing
-                        </Badge>
-                      )}
-                      {image.status === "completed" && (
-                        <Badge className="bg-green-500 text-white gap-1">
-                          <Sparkles className="h-3 w-3" />
-                          Analyzed
-                        </Badge>
-                      )}
-                      {image.status === "error" && (
-                        <Badge variant="destructive" className="gap-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          Error
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
+            {images.map((image) => {
+              const trades = confirmedTrades[image.id] || [];
+              const confirmedCount = trades.filter((t) => t.confirmed && !t.discarded).length;
 
-                  {/* OCR Results Panel */}
-                  <CardContent className="p-5">
-                    {!image.ocrResult && image.status !== "processing" && (
-                      <div className="flex flex-col items-center justify-center h-full py-10 gap-4">
-                        <ImageIcon className="h-10 w-10 text-muted-foreground/50" />
-                        <div className="text-center">
-                          <p className="font-medium">Ready for OCR analysis</p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Click analyze to extract text and trade data
-                          </p>
-                        </div>
-                        <Button onClick={() => analyzeImage(image.id)} className="gap-2" disabled={ocr.isProcessing}>
-                          <Sparkles className="h-4 w-4" />
-                          Analyze Screenshot
+              return (
+                <Card key={image.id} className="overflow-hidden transition-all hover:shadow-md">
+                  <div className="grid md:grid-cols-[300px_1fr]">
+                    {/* Image Preview */}
+                    <div className="relative group bg-muted">
+                      <img
+                        src={image.preview}
+                        alt="Screenshot"
+                        className="h-52 md:h-full w-full object-cover cursor-pointer"
+                        onClick={() => setFullscreenImage(image.preview)}
+                      />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() => setFullscreenImage(image.preview)}
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="h-9 w-9"
+                          onClick={() => removeImage(image.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                    )}
-
-                    {image.status === "processing" && (
-                      <div className="flex flex-col items-center justify-center h-full py-10 gap-4">
-                        <div className="relative">
-                          <div className="h-12 w-12 rounded-full border-4 border-primary/20" />
-                          <Loader2 className="absolute inset-0 h-12 w-12 animate-spin text-primary" />
-                        </div>
-                        <div className="text-center">
-                          <p className="font-medium">OCR in Progress</p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Extracting text from screenshot... {ocr.progress}%
-                          </p>
-                        </div>
+                      <div className="absolute top-2 left-2">
+                        {image.status === "processing" && (
+                          <Badge variant="secondary" className="gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            OCR Processing
+                          </Badge>
+                        )}
+                        {image.status === "completed" && (
+                          <Badge className="bg-green-500 text-white gap-1">
+                            <Sparkles className="h-3 w-3" />
+                            Analyzed
+                          </Badge>
+                        )}
+                        {image.status === "error" && (
+                          <Badge variant="destructive" className="gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            Error
+                          </Badge>
+                        )}
                       </div>
-                    )}
+                    </div>
 
-                    {image.ocrResult && (
-                      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                        {/* Overall Confidence */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-sm">
-                              OCR Confidence: {image.ocrResult.overallConfidence}%
-                            </Badge>
-                            {image.ocrResult.trades.length > 0 && (
-                              <Badge className="bg-primary text-white">
-                                {image.ocrResult.trades.length} Trade{image.ocrResult.trades.length > 1 ? "s" : ""} Detected
-                              </Badge>
-                            )}
+                    {/* OCR Results Panel */}
+                    <CardContent className="p-5">
+                      {!image.ocrResult && image.status !== "processing" && (
+                        <div className="flex flex-col items-center justify-center h-full py-10 gap-4">
+                          <ImageIcon className="h-10 w-10 text-muted-foreground/50" />
+                          <div className="text-center">
+                            <p className="font-medium">Ready for OCR analysis</p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Click analyze to extract trade data
+                            </p>
                           </div>
-                          <span className="text-xs text-muted-foreground">
-                            {image.ocrResult.processingTimeMs}ms
-                          </span>
+                          <Button onClick={() => analyzeImage(image.id)} className="gap-2" disabled={ocr.isProcessing}>
+                            <Sparkles className="h-4 w-4" />
+                            Analyze Screenshot
+                          </Button>
                         </div>
+                      )}
 
-                        {/* Detected Prices */}
-                        {image.ocrResult.detectedPrices.length > 0 && (
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                              <BarChart3 className="h-3 w-3" />
-                              Detected Prices ({image.ocrResult.detectedPrices.length})
-                            </h4>
-                            <div className="flex flex-wrap gap-2">
-                              {image.ocrResult.detectedPrices.map((price, i) => (
-                                <Badge key={i} variant="secondary" className="font-mono">
-                                  {price.toFixed(price < 100 ? 5 : 2)}
+                      {image.status === "processing" && (
+                        <div className="flex flex-col items-center justify-center h-full py-10 gap-4">
+                          <div className="relative">
+                            <div className="h-12 w-12 rounded-full border-4 border-primary/20" />
+                            <Loader2 className="absolute inset-0 h-12 w-12 animate-spin text-primary" />
+                          </div>
+                          <div className="text-center">
+                            <p className="font-medium">OCR in Progress</p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Extracting text from screenshot... {ocr.progress}%
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {image.ocrResult && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                          {/* OCR Confidence */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-sm">
+                                OCR Confidence: {image.ocrResult.overallConfidence}%
+                              </Badge>
+                              {trades.length > 0 && (
+                                <Badge className="bg-primary text-white">
+                                  {trades.length} Trade{trades.length > 1 ? "s" : ""} Detected
                                 </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Detected Order Types */}
-                        {image.ocrResult.detectedOrderTypes.length > 0 && (
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                              Detected Order Types
-                            </h4>
-                            <div className="flex flex-wrap gap-2">
-                              {image.ocrResult.detectedOrderTypes.map((type, i) => (
-                                <Badge key={i} variant="outline" className="capitalize">
-                                  {type}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <Separator />
-
-                        {/* Extracted Trades */}
-                        {image.ocrResult.trades.length > 0 && (
-                          <div className="space-y-3">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                              Extracted Trades
-                            </h4>
-                            {image.ocrResult.trades.map((trade, index) => (
-                              <Card key={index} className="border-l-4 border-l-primary">
-                                <CardContent className="p-4 space-y-3">
-                                  {/* Trade Header */}
-                                  <div className="flex items-center justify-between flex-wrap gap-2">
-                                    <div className="flex items-center gap-2">
-                                      <Badge variant="outline" className="text-base px-3 py-1 font-bold font-mono">
-                                        {trade.symbol}
-                                      </Badge>
-                                      {trade.direction !== "unknown" ? (
-                                        <Badge className={cn(
-                                          "gap-1",
-                                          trade.direction === "buy"
-                                            ? "bg-green-500 text-white"
-                                            : "bg-red-500 text-white"
-                                        )}>
-                                          {trade.direction === "buy" ? (
-                                            <TrendingUp className="h-3 w-3" />
-                                          ) : (
-                                            <TrendingDown className="h-3 w-3" />
-                                          )}
-                                          {trade.direction.toUpperCase()}
-                                        </Badge>
-                                      ) : (
-                                        <Badge variant="secondary">
-                                          <Minus className="h-3 w-3 mr-1" />
-                                          Unknown
-                                        </Badge>
-                                      )}
-                                      <Badge variant="outline">{trade.confidence}% confidence</Badge>
-                                    </div>
-                                    <Button
-                                      size="sm"
-                                      className="gap-1"
-                                      onClick={() => handleAutoFill(index, image)}
-                                      disabled={trade.symbol === "Unknown" && trade.entryPrice === null}
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                      Auto Fill Trade
-                                    </Button>
-                                  </div>
-
-                                  {/* Trade Details Grid */}
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                    <div className="space-y-1">
-                                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                        <Crosshair className="h-3 w-3" /> Entry
-                                      </p>
-                                      <p className="font-mono text-sm font-semibold">
-                                        {trade.entryPrice !== null
-                                          ? trade.entryPrice.toFixed(trade.entryPrice < 100 ? 5 : 2)
-                                          : "Unknown"}
-                                      </p>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                        <Shield className="h-3 w-3" /> Stop Loss
-                                      </p>
-                                      <p className="font-mono text-sm font-semibold text-red-500">
-                                        {trade.stopLoss !== null
-                                          ? trade.stopLoss.toFixed(trade.stopLoss < 100 ? 5 : 2)
-                                          : "Unknown"}
-                                      </p>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                        <Target className="h-3 w-3" /> Take Profit
-                                      </p>
-                                      <p className="font-mono text-sm font-semibold text-green-500">
-                                        {trade.takeProfit.length > 0
-                                          ? trade.takeProfit.map((tp) => tp.toFixed(tp < 100 ? 5 : 2)).join(", ")
-                                          : "Unknown"}
-                                      </p>
-                                    </div>
-                                    {trade.positionSize !== null && (
-                                      <div className="space-y-1">
-                                        <p className="text-xs text-muted-foreground">Position Size</p>
-                                        <p className="font-mono text-sm font-semibold">{trade.positionSize}</p>
-                                      </div>
-                                    )}
-                                    {trade.riskReward !== null && (
-                                      <div className="space-y-1">
-                                        <p className="text-xs text-muted-foreground">R:R Ratio</p>
-                                        <p className="font-mono text-sm font-semibold text-primary">
-                                          {trade.riskReward}:1
-                                        </p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Raw Text (collapsible) */}
-                        {image.ocrResult.rawText && (
-                          <div className="space-y-2">
-                            <button
-                              className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-                              onClick={() => setExpandedText(expandedText === image.id ? null : image.id)}
-                            >
-                              <FileText className="h-3 w-3" />
-                              Detected Raw Text
-                              {expandedText === image.id ? (
-                                <ChevronUp className="h-3 w-3" />
-                              ) : (
-                                <ChevronDown className="h-3 w-3" />
                               )}
-                            </button>
-                            {expandedText === image.id && (
-                              <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap font-mono">
-                                {image.ocrResult.rawText}
-                              </pre>
-                            )}
-                          </div>
-                        )}
-
-                        {/* No trades detected message */}
-                        {image.ocrResult.rawText && image.ocrResult.trades.length === 0 && (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg p-3">
-                            <AlertTriangle className="h-4 w-4 text-amber-500" />
-                            <span>
-                              Text was detected but no trade data could be extracted.
-                              Try a clearer screenshot with visible price levels.
+                              {confirmedCount > 0 && (
+                                <Badge className="bg-green-500 text-white gap-1">
+                                  <Check className="h-3 w-3" />
+                                  {confirmedCount} Confirmed
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {image.ocrResult.processingTimeMs}ms
                             </span>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </CardContent>
-                </div>
-              </Card>
-            ))}
+
+                          {/* Extracted Trades */}
+                          {trades.length > 0 ? (
+                            <div className="space-y-3">
+                              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                Detected Trades
+                              </h4>
+                              {trades.map((trade) => {
+                                const isEditing = editingTrade === trade.id;
+                                const isConfirmed = trade.confirmed;
+                                const isDiscarded = trade.discarded;
+
+                                return (
+                                  <Card
+                                    key={trade.id}
+                                    className={cn(
+                                      "border-l-4 transition-all",
+                                      isConfirmed ? "border-l-green-500" : isDiscarded ? "border-l-red-500 opacity-60" : "border-l-primary"
+                                    )}
+                                  >
+                                    <CardContent className="p-4 space-y-3">
+                                      {/* Trade Header */}
+                                      <div className="flex items-center justify-between flex-wrap gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Badge variant="outline" className="text-base px-3 py-1 font-bold font-mono">
+                                            {trade.symbol}
+                                          </Badge>
+                                          {trade.direction !== "unknown" ? (
+                                            <Badge className={cn(
+                                              "gap-1",
+                                              trade.direction === "buy"
+                                                ? "bg-green-500 text-white"
+                                                : "bg-red-500 text-white"
+                                            )}>
+                                              {trade.direction === "buy" ? (
+                                                <TrendingUp className="h-3 w-3" />
+                                              ) : (
+                                                <TrendingDown className="h-3 w-3" />
+                                              )}
+                                              {trade.direction.toUpperCase()}
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="secondary">
+                                              <Minus className="h-3 w-3 mr-1" />
+                                              Unknown
+                                            </Badge>
+                                          )}
+                                          <Badge variant="outline">{trade.confidence}% confidence</Badge>
+                                          {isConfirmed && (
+                                            <Badge className="bg-green-500 text-white gap-1">
+                                              <Check className="h-3 w-3" />
+                                              Confirmed
+                                            </Badge>
+                                          )}
+                                          {isDiscarded && (
+                                            <Badge variant="destructive" className="gap-1">
+                                              <XCircle className="h-3 w-3" />
+                                              Discarded
+                                            </Badge>
+                                          )}
+                                        </div>
+
+                                        {/* Action Buttons */}
+                                        {!isConfirmed && !isDiscarded && (
+                                          <div className="flex items-center gap-1">
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-8 gap-1"
+                                              onClick={() => handleEditTrade(trade.id)}
+                                            >
+                                              <Pencil className="h-3 w-3" />
+                                              {isEditing ? "Done" : "Edit"}
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              className="h-8 gap-1 bg-green-500 hover:bg-green-600 text-white"
+                                              onClick={() => handleConfirmTrade(image.id, trade.id)}
+                                            >
+                                              <Check className="h-3 w-3" />
+                                              Confirm
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              className="h-8 gap-1 text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                              onClick={() => handleDiscardTrade(image.id, trade.id)}
+                                            >
+                                              <X className="h-3 w-3" />
+                                              Discard
+                                            </Button>
+                                          </div>
+                                        )}
+
+                                        {isConfirmed && (
+                                          <Button
+                                            size="sm"
+                                            className="h-8 gap-1"
+                                            onClick={() => handleAutoFill(image.id, trade.id)}
+                                          >
+                                            <Plus className="h-3 w-3" />
+                                            Auto Fill Trade
+                                          </Button>
+                                        )}
+                                      </div>
+
+                                      {/* Trade Editor */}
+                                      {isEditing && !isConfirmed && !isDiscarded && (
+                                        <TradeEditor
+                                          trade={trade}
+                                          onUpdate={(updated) => handleUpdateTrade(image.id, updated)}
+                                        />
+                                      )}
+
+                                      {/* Trade Details (read-only) */}
+                                      {(!isEditing || isConfirmed) && (
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                          <div className="space-y-1">
+                                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                              <Crosshair className="h-3 w-3" /> Entry
+                                            </p>
+                                            <p className="font-mono text-sm font-semibold">
+                                              {trade.entryPrice !== null
+                                                ? trade.entryPrice.toFixed(trade.entryPrice < 100 ? 5 : 2)
+                                                : "Not detected"}
+                                            </p>
+                                          </div>
+                                          <div className="space-y-1">
+                                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                              <Shield className="h-3 w-3" /> Stop Loss
+                                            </p>
+                                            <p className="font-mono text-sm font-semibold text-red-500">
+                                              {trade.stopLoss !== null
+                                                ? trade.stopLoss.toFixed(trade.stopLoss < 100 ? 5 : 2)
+                                                : "Not detected"}
+                                            </p>
+                                          </div>
+                                          <div className="space-y-1">
+                                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                              <Target className="h-3 w-3" /> Take Profit
+                                            </p>
+                                            <p className="font-mono text-sm font-semibold text-green-500">
+                                              {trade.takeProfit.length > 0
+                                                ? trade.takeProfit.map((tp) => tp.toFixed(tp < 100 ? 5 : 2)).join(", ")
+                                                : "Not detected"}
+                                            </p>
+                                          </div>
+                                          {trade.positionSize !== null && (
+                                            <div className="space-y-1">
+                                              <p className="text-xs text-muted-foreground">Position Size</p>
+                                              <p className="font-mono text-sm font-semibold">{trade.positionSize} lots</p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </CardContent>
+                                  </Card>
+                                );
+                              })}
+
+                              {/* Auto Fill All Button */}
+                              {confirmedCount > 0 && (
+                                <Button
+                                  onClick={() => handleAutoFillAllConfirmed(image.id)}
+                                  className="w-full gap-2"
+                                >
+                                  <Plus className="h-4 w-4" />
+                                  Auto Fill First Confirmed Trade
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            /* No trades detected */
+                            image.ocrResult.rawText && (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg p-3">
+                                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                <span>
+                                  Text was detected but no trade data could be extracted.
+                                  Try a clearer screenshot with visible price levels.
+                                </span>
+                              </div>
+                            )
+                          )}
+
+                          {/* Raw Text (collapsible) */}
+                          {image.ocrResult.rawText && (
+                            <div className="space-y-2">
+                              <button
+                                className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={() => setExpandedText(expandedText === image.id ? null : image.id)}
+                              >
+                                <FileText className="h-3 w-3" />
+                                Show Raw OCR Text
+                                {expandedText === image.id ? (
+                                  <ChevronUp className="h-3 w-3" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3" />
+                                )}
+                              </button>
+                              {expandedText === image.id && (
+                                <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap font-mono">
+                                  {image.ocrResult.rawText}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}
