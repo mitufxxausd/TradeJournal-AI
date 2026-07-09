@@ -1,27 +1,31 @@
 /**
  * AI Screenshot Analysis Page
- * Phase 6B: Complete rewrite with Review Screen, Quality Metrics,
- * Editable Fields, and Future Vision Architecture.
+ * Phase 6C: AI Vision Architecture + Intelligent Chart Understanding
  *
  * Workflow:
- *   Upload Screenshot → OCR Extraction → Parser → Trade Review →
- *   User Confirmation → Import
+ *   Upload Screenshot → OCR Text Extraction → Trade Fusion Engine →
+ *   Review (with sections) → User Confirmation → Import
+ *
+ * Architecture:
+ *   Screenshot → OCR (Tesseract) → Parser → TradeFusionEngine → Review
+ *                                          ↑
+ *                              Future: AI Vision Provider
  *
  * Key Rules:
  * - OCR only reads text, never understands charts
  * - TP never comes from chart axis numbers
- * - Symbol uses fuzzy matching (Gold → XAUUSD)
+ * - Symbol uses SymbolDetector with fuzzy matching
  * - Every field is editable
  * - No fake AI analysis
  * - Quality metrics are measurable
+ * - Mobile-first responsive design
  */
 
 import { useState, useRef, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,14 +42,10 @@ import {
   Trash2,
   Loader2,
   Lock,
-  Crosshair,
-  Shield,
-  Target,
   TrendingUp,
   TrendingDown,
   Minus,
   Sparkles,
-  ImageIcon,
   AlertTriangle,
   FileText,
   Eye,
@@ -57,8 +57,9 @@ import {
   Plus,
   ScanText,
   BarChart3,
-  Settings,
-  Smartphone,
+  Info,
+  Monitor,
+  Brain,
 } from "lucide-react";
 
 // ─── Types ───
@@ -107,13 +108,80 @@ function LockedFeature() {
   );
 }
 
+// ─── AI Vision Status Card ───
+
+function VisionStatusCard() {
+  const visionProviders = [
+    { name: "OpenAI Vision", id: "openai", status: "not_configured" as const },
+    { name: "Gemini Vision", id: "gemini", status: "not_configured" as const },
+    { name: "Claude Vision", id: "claude", status: "not_configured" as const },
+    { name: "OpenRouter Vision", id: "openrouter", status: "not_configured" as const },
+  ];
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Brain className="h-4 w-4 text-purple-500" />
+          AI Vision Status
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Current and future AI Vision providers for chart understanding
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Current Provider */}
+        <div className="flex items-center gap-3 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+          <ScanText className="h-4 w-4 text-blue-600 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-blue-800 dark:text-blue-300">Current Provider</p>
+            <p className="text-xs text-blue-600 dark:text-blue-400">OCR Only (Tesseract)</p>
+          </div>
+          <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
+            Active
+          </Badge>
+        </div>
+
+        {/* Future Providers */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Future Providers (Not Configured)
+          </p>
+          {visionProviders.map((provider) => (
+            <div
+              key={provider.id}
+              className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-muted-foreground"
+            >
+              <Monitor className="h-3 w-3 shrink-0" />
+              <span className="truncate">{provider.name}</span>
+              <Badge variant="outline" className="ml-auto text-[10px] shrink-0 opacity-50">
+                Future
+              </Badge>
+            </div>
+          ))}
+        </div>
+
+        {/* Info Box */}
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <p>
+            <strong>OCR reads text only</strong> — it cannot understand charts, trends, patterns, or visuals.
+            <strong> AI Vision</strong> will understand charts, support/resistance, patterns, and visual context.
+            Configure a Vision provider above to enable advanced chart analysis.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Quality Metrics Display ───
 
 function QualityMetricsDisplay({ metrics }: { metrics: OCRQualityMetrics }) {
   return (
     <div className="grid grid-cols-3 gap-2 sm:gap-4">
       <div className="text-center p-2 sm:p-3 rounded-lg bg-muted/50">
-        <p className="text-xs text-muted-foreground mb-1">OCR Quality</p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">OCR Quality</p>
         <p className={cn(
           "text-lg sm:text-2xl font-bold",
           metrics.ocrQuality >= 80 ? "text-green-500" :
@@ -123,7 +191,7 @@ function QualityMetricsDisplay({ metrics }: { metrics: OCRQualityMetrics }) {
         </p>
       </div>
       <div className="text-center p-2 sm:p-3 rounded-lg bg-muted/50">
-        <p className="text-xs text-muted-foreground mb-1">Parser Confidence</p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Parser Confidence</p>
         <p className={cn(
           "text-lg sm:text-2xl font-bold",
           metrics.parserConfidence >= 80 ? "text-green-500" :
@@ -133,7 +201,7 @@ function QualityMetricsDisplay({ metrics }: { metrics: OCRQualityMetrics }) {
         </p>
       </div>
       <div className="text-center p-2 sm:p-3 rounded-lg bg-muted/50">
-        <p className="text-xs text-muted-foreground mb-1">Trade Completeness</p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Completeness</p>
         <p className={cn(
           "text-lg sm:text-2xl font-bold",
           metrics.tradeCompleteness >= 80 ? "text-green-500" :
@@ -153,17 +221,17 @@ function QualityMetricsDisplay({ metrics }: { metrics: OCRQualityMetrics }) {
 
 function FieldStatus({ detected, label, value }: { detected: boolean; label: string; value?: string | number | null }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className="flex items-center gap-2 text-sm min-w-0">
       {detected ? (
         <Check className="h-4 w-4 text-green-500 shrink-0" />
       ) : (
         <XCircle className="h-4 w-4 text-muted-foreground/50 shrink-0" />
       )}
-      <span className={cn(detected ? "text-foreground" : "text-muted-foreground")}>
+      <span className={cn(detected ? "text-foreground" : "text-muted-foreground", "truncate")}>
         {label}
       </span>
       {detected && value !== undefined && value !== null && value !== "" && (
-        <Badge variant="outline" className="text-xs ml-auto font-mono">
+        <Badge variant="outline" className="text-xs ml-auto font-mono shrink-0">
           {typeof value === "number" ? value.toFixed(value < 100 ? 5 : 2) : value}
         </Badge>
       )}
@@ -171,7 +239,7 @@ function FieldStatus({ detected, label, value }: { detected: boolean; label: str
   );
 }
 
-// ─── Trade Review Card ───
+// ─── Trade Review Card (Enhanced with Sections) ───
 
 function TradeReviewCard({
   trade,
@@ -201,6 +269,9 @@ function TradeReviewCard({
     { key: "positionSize" as const, label: "Position Size", detected: trade.positionSize !== null, value: trade.positionSize },
   ];
 
+  const successfulFields = detectedFields.filter((f) => f.detected);
+  const missingFields = detectedFields.filter((f) => !f.detected);
+
   return (
     <Card className={cn(
       "border-l-4 transition-all",
@@ -208,7 +279,7 @@ function TradeReviewCard({
     )}>
       <CardContent className="p-3 sm:p-4 space-y-3">
         {/* Trade Header */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline" className="text-sm px-2 py-1 font-bold font-mono">
               {trade.symbol || "Symbol not detected"}
@@ -257,7 +328,7 @@ function TradeReviewCard({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 gap-1 text-xs sm:text-sm"
+                className="h-8 gap-1 text-xs"
                 onClick={onToggleEdit}
               >
                 <Pencil className="h-3 w-3" />
@@ -265,7 +336,7 @@ function TradeReviewCard({
               </Button>
               <Button
                 size="sm"
-                className="h-8 gap-1 bg-green-500 hover:bg-green-600 text-white text-xs sm:text-sm"
+                className="h-8 gap-1 bg-green-500 hover:bg-green-600 text-white text-xs"
                 onClick={onConfirm}
               >
                 <Check className="h-3 w-3" />
@@ -274,7 +345,7 @@ function TradeReviewCard({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-8 gap-1 text-red-500 hover:text-red-600 hover:bg-red-500/10 text-xs sm:text-sm"
+                className="h-8 gap-1 text-red-500 hover:text-red-600 hover:bg-red-500/10 text-xs"
                 onClick={onDiscard}
               >
                 <X className="h-3 w-3" />
@@ -286,7 +357,7 @@ function TradeReviewCard({
           {isConfirmed && (
             <Button
               size="sm"
-              className="h-8 gap-1 text-xs sm:text-sm"
+              className="h-8 gap-1 text-xs"
               onClick={onImport}
             >
               <Plus className="h-3 w-3" />
@@ -300,28 +371,85 @@ function TradeReviewCard({
           <QualityMetricsDisplay metrics={trade.qualityMetrics} />
         )}
 
-        {/* Field Detection Status */}
-        {!isEditing && !isDiscarded && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {detectedFields.map((field) => (
-              <FieldStatus
-                key={field.key}
-                detected={field.detected}
-                label={field.label}
-                value={field.value}
-              />
-            ))}
+        {/* Sections: Detected Successfully */}
+        {!isEditing && !isDiscarded && successfulFields.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-green-600 dark:text-green-400 flex items-center gap-1">
+              <Check className="h-3 w-3" />
+              Detected Successfully ({successfulFields.length})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {successfulFields.map((field) => (
+                <FieldStatus
+                  key={field.key}
+                  detected={true}
+                  label={field.label}
+                  value={field.value}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sections: Missing Information */}
+        {!isEditing && !isDiscarded && missingFields.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              Missing Information ({missingFields.length})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {missingFields.map((field) => (
+                <FieldStatus
+                  key={field.key}
+                  detected={false}
+                  label={field.label}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sections: Needs Review */}
+        {!isEditing && !isDiscarded && trade.confidenceLevel !== "high" && (
+          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-2.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-300 flex items-center gap-1 mb-1">
+              <Eye className="h-3 w-3" />
+              Needs Review
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              {trade.confidenceLevel === "low"
+                ? "Low confidence detection. Please verify all fields before importing. Consider taking a clearer screenshot with visible trade labels."
+                : "Medium confidence. Some fields were detected but may need verification. Please review before importing."}
+            </p>
+          </div>
+        )}
+
+        {/* Sections: Warnings */}
+        {!isEditing && !isDiscarded && !trade.symbol && (
+          <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-2.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-red-700 dark:text-red-300 flex items-center gap-1 mb-1">
+              <AlertTriangle className="h-3 w-3" />
+              Warnings
+            </p>
+            <p className="text-xs text-red-800 dark:text-red-200">
+              Symbol not detected. Please enter the trading pair manually in the edit form.
+            </p>
           </div>
         )}
 
         {/* Trade Editor */}
         {isEditing && !isConfirmed && !isDiscarded && (
           <div className="space-y-3 p-3 bg-muted/50 rounded-lg animate-in fade-in">
+            <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <Pencil className="h-3 w-3" />
+              Edit Trade Fields
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Symbol</Label>
                 <Input
-                  value={trade.symbol}
+                  value={trade.symbol === "Symbol not detected" ? "" : trade.symbol}
                   onChange={(e) => onUpdate({ ...trade, symbol: e.target.value.toUpperCase() })}
                   className="h-9 text-sm font-mono"
                   placeholder="e.g. XAUUSD"
@@ -452,6 +580,7 @@ export default function AIScreenshotAnalysis() {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [expandedText, setExpandedText] = useState<string | null>(null);
   const [reviewTrades, setReviewTrades] = useState<Record<string, ReviewTrade[]>>({});
+  const [showVisionStatus, setShowVisionStatus] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canAccess = hasAccess("aiScreenshotAnalysis");
@@ -676,22 +805,41 @@ export default function AIScreenshotAnalysis() {
               Upload trading screenshots for OCR-powered trade extraction
             </p>
           </div>
-          {images.some((i) => i.status === "ready") && (
+          <div className="flex items-center gap-2">
             <Button
-              onClick={analyzeAll}
-              className="gap-2 w-full sm:w-auto"
-              disabled={ocr.isProcessing}
+              variant="outline"
+              size="sm"
+              className="gap-1 text-xs"
+              onClick={() => setShowVisionStatus(!showVisionStatus)}
             >
-              {ocr.isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Analyze All
+              <Brain className="h-3.5 w-3.5" />
+              {showVisionStatus ? "Hide" : "AI Vision"}
             </Button>
-          )}
+            {images.some((i) => i.status === "ready") && (
+              <Button
+                onClick={analyzeAll}
+                className="gap-2"
+                size="sm"
+                disabled={ocr.isProcessing}
+              >
+                {ocr.isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Analyze All
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* AI Vision Status Panel */}
+        {showVisionStatus && (
+          <div className="animate-in fade-in slide-in-from-top-2">
+            <VisionStatusCard />
+          </div>
+        )}
 
         {/* Info Banner */}
         <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 sm:p-4 flex items-start gap-3">
           <Eye className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
-          <div>
+          <div className="min-w-0">
             <h4 className="font-semibold text-sm text-blue-700 dark:text-blue-400">OCR-Powered Analysis</h4>
             <p className="text-xs sm:text-sm text-muted-foreground mt-1">
               Extracts text from screenshots using Tesseract.js. Detects symbol, direction, entry,
@@ -765,7 +913,8 @@ export default function AIScreenshotAnalysis() {
 
                 return (
                   <Card key={image.id} className="overflow-hidden transition-all hover:shadow-md">
-                    <div className="grid grid-cols-1 md:grid-cols-[280px_1fr]">
+                    {/* Mobile: stacked layout, Desktop: side by side */}
+                    <div className="flex flex-col md:grid md:grid-cols-[minmax(0,280px)_1fr]">
                       {/* Image Preview */}
                       <div className="relative group bg-muted">
                         <img
@@ -815,7 +964,7 @@ export default function AIScreenshotAnalysis() {
                       </div>
 
                       {/* OCR Results Panel */}
-                      <CardContent className="p-3 sm:p-5">
+                      <CardContent className="p-3 sm:p-5 min-w-0">
                         {/* Ready for analysis state */}
                         {!image.ocrResult && image.status !== "processing" && (
                           <EmptyAnalysisState onAnalyze={() => analyzeImage(image.id)} />
@@ -839,7 +988,7 @@ export default function AIScreenshotAnalysis() {
 
                         {/* Analysis Results */}
                         {image.ocrResult && (
-                          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500 min-w-0">
                             {/* Warning Banner */}
                             {image.ocrResult.warning && (
                               <div className={cn(
@@ -849,7 +998,7 @@ export default function AIScreenshotAnalysis() {
                                   : "border-amber-500/30 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
                               )}>
                                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                                <span>{image.ocrResult.warning}</span>
+                                <span className="break-words">{image.ocrResult.warning}</span>
                               </div>
                             )}
 
@@ -932,7 +1081,7 @@ export default function AIScreenshotAnalysis() {
                                   )}
                                 </button>
                                 {expandedText === image.id && (
-                                  <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap font-mono">
+                                  <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap font-mono break-words">
                                     {image.ocrResult.rawText}
                                   </pre>
                                 )}
@@ -958,7 +1107,7 @@ export default function AIScreenshotAnalysis() {
             <Button
               variant="ghost"
               size="icon"
-              className="absolute top-4 right-4 text-white hover:bg-white/20"
+              className="absolute top-4 right-4 text-white hover:bg-white/20 z-10"
               onClick={() => setFullscreenImage(null)}
             >
               <X className="h-6 w-6" />
@@ -966,7 +1115,7 @@ export default function AIScreenshotAnalysis() {
             <img
               src={fullscreenImage}
               alt="Fullscreen preview"
-              className="max-h-[90vh] max-w-full rounded-lg object-contain"
+              className="max-h-[85vh] max-w-full rounded-lg object-contain"
               onClick={(e) => e.stopPropagation()}
             />
           </div>
