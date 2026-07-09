@@ -1,33 +1,27 @@
 /**
- * OCR Service Index
- * Centralized exports for OCR functionality.
- *
- * Architecture:
- *   OCR Provider (Tesseract) → Raw Text → Parser → Trade Objects → UI
- *
- * Each layer is independent:
- * - OCR Provider: Only extracts text from images
- * - Parser: Only converts text to structured data
- * - Trade Extractor: Only filters and validates trade fields
- * - UI: Only displays data, never invents it
- *
- * Future providers can implement the OCRProvider or VisionProvider interface
- * and plug into the same parser layer.
+ * OCR Module for TradeJournal AI
+ * Exports all OCR-related functionality including the SymbolDetector.
  */
 
-export {
-  runOCR,
-  extractTextFromImage,
-  cancelOCR,
-  getOCRLanguages,
-  preloadTesseract,
-  getOCRProvider,
-} from "./tesseractOCR";
+export { runOCR, cancelOCR, preloadTesseract } from "./tesseractOCR";
+
+export type { OCROptions } from "./tesseractOCR";
 
 export {
   parseOCRText,
   cleanOCRText,
 } from "./parser";
+
+export {
+  detectSymbol,
+  detectSymbolFromSources,
+  normalizeSymbol,
+} from "./symbolDetector";
+
+export type {
+  SymbolDetectionResult,
+  SymbolSource,
+} from "./symbolDetector";
 
 export type {
   OCRTrade,
