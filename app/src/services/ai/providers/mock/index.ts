@@ -1,311 +1,219 @@
+/**
+ * AI Mock Analysis Provider
+ * Simulates AI analysis without making real API calls.
+ * Used for development, testing, and when no API keys are configured.
+ */
+
 import type {
-  AIProvider,
-  AIResponse,
   AIRequestOptions,
-  AIModelInfo,
-  AIProviderCapability,
-} from "../../types/common";
+  AIResponse,
+  ChartAnalysisRequest,
+  ChartAnalysisResult,
+  ChartPattern,
+  KeyLevel,
+  TradeAnalysisRequest,
+  TradeAnalysisResult,
+  MarketContext,
+  RiskAssessment,
+  ScreenshotAnalysis,
+  ExtractedTradeData,
+  DetectedPrice,
+  ExtractedFieldStatus,
+  AIProcessingState,
+  SubscriptionTier,
+} from "../../types";
+
 import type {
-  VisionProvider,
-  OCRProvider,
-  SummaryProvider,
-  CoachingProvider,
-  TranscriptionProvider,
   ChartAnalysisProvider,
   TradeAnalysisProvider,
+  ProcessingProvider,
 } from "../interfaces";
-import type { ChartAnalysisRequest, ChartAnalysisResult } from "../../types/chart-analysis";
-import type { OCRResult, OCROptions } from "../../types/ocr";
-import type { TradeAnalysisRequest, TradeAnalysisResult } from "../../types/trade-analysis";
-import type { CoachingRequest, CoachingResult, CoachingSession, CoachMessage } from "../../types/coaching";
-import type { TranscriptionRequest, VoiceTranscript, TranscriptionOptions } from "../../types/transcription";
+
 import {
-  simulateProcessing,
-  generateMockChartAnalysis,
-  generateMockOCRResult,
-  generateMockTradeScore,
+  mockCoachingData,
+  mockChartPatterns,
+  mockSupportResistance,
   generateMockTradeSummary,
+  generateMockTradeScore,
   generateMockConfidenceScore,
   generateMockRiskAnalysis,
   generateMockTradeSuggestions,
-  generateMockCoachingResult,
-  generateMockTranscript,
+  generateMockId,
+  pickRandom,
 } from "./mock-data";
 
-/**
- * Mock AI Provider
- * Returns realistic fake data for all AI capabilities
- * No API key required - used for development and testing
- */
-export class MockProvider
-  implements
-    AIProvider,
-    VisionProvider,
-    OCRProvider,
-    SummaryProvider,
-    CoachingProvider,
-    TranscriptionProvider,
-    ChartAnalysisProvider,
-    TradeAnalysisProvider
+import { simulateProcessing } from "../../utils";
+
+// ─── Mock Provider ───
+
+export class MockAnalysisProvider
+  implements ChartAnalysisProvider, TradeAnalysisProvider, ProcessingProvider
 {
   readonly name = "Mock AI Provider";
   readonly version = "1.0.0";
-  readonly capabilities: AIProviderCapability[] = [
-    "chat",
-    "vision",
-    "ocr",
-    "summary",
-    "coaching",
-    "transcription",
-    "chart-analysis",
-    "trade-analysis",
-  ];
+  readonly providerId = "mock";
+  readonly requiredTier: SubscriptionTier = "free";
 
-  private _models: AIModelInfo[] = [
-    {
-      id: "mock-gpt-4",
-      name: "Mock GPT-4",
-      provider: "mock",
-      capabilities: this.capabilities,
-      contextWindow: 128000,
-      maxOutputTokens: 4096,
-    },
-    {
-      id: "mock-vision",
-      name: "Mock Vision",
-      provider: "mock",
-      capabilities: ["vision", "chart-analysis", "ocr"],
-      contextWindow: 128000,
-      maxOutputTokens: 4096,
-    },
-    {
-      id: "mock-coach",
-      name: "Mock Trading Coach",
-      provider: "mock",
-      capabilities: ["coaching", "summary"],
-      contextWindow: 32000,
-      maxOutputTokens: 2048,
-    },
-  ];
+  private processingState: AIProcessingState = {
+    status: "pending",
+    progress: 0,
+    message: "Waiting for request",
+  };
 
-  get models(): AIModelInfo[] {
-    return this._models;
-  }
-
-  isAvailable(): boolean {
-    return true;
-  }
-
-  async getHealth(): Promise<{ status: "healthy" | "degraded" | "unhealthy"; latencyMs: number }> {
-    const latencyMs = Math.floor(Math.random() * 50) + 10;
-    await simulateProcessing(10, 50);
-    return { status: "healthy", latencyMs };
-  }
-
-  getModels(): AIModelInfo[] {
-    return this.models;
-  }
-
-  // ─── Vision Provider ───
+  // ─── Chart Analysis ───
 
   async analyzeChart(
-    request: ChartAnalysisRequest,
+    _request: ChartAnalysisRequest,
     options?: AIRequestOptions
-  ): Promise<AIResponse<ChartAnalysisResult>> {
+  ): Promise<ChartAnalysisResult> {
     const processingTimeMs = await simulateProcessing(800, 2000);
-    const result = generateMockChartAnalysis();
 
-    return {
-      data: result,
-      provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
+    if (options?.signal?.aborted) {
+      throw new Error("Analysis was cancelled");
+    }
+
+    const patterns: ChartPattern[] = mockChartPatterns
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3)
+      .map((p) => ({
+        pattern: p.pattern,
+        confidence: p.confidence,
+        direction: p.direction,
+        description: p.description,
+      }));
+
+    const keyLevels: KeyLevel[] = mockSupportResistance.map((level) => ({
+      type: level.type,
+      price: level.level,
+      strength: level.strength,
+      touches: level.touches,
+    }));
+
+    const marketContext: MarketContext = {
+      trend: pickRandom(["bullish", "bearish", "sideways"]),
+      volatility: pickRandom(["low", "moderate", "high"]),
+      volume: pickRandom(["below_average", "average", "above_average"]),
+      session: "london_ny_overlap",
+      keyEvents: ["Fed speakers scheduled", "NFP data Friday"].filter(() => Math.random() > 0.3),
     };
-  }
 
-  async analyzeImage(imageUrl: string, prompt: string, options?: AIRequestOptions): Promise<AIResponse<string>> {
-    const processingTimeMs = await simulateProcessing(600, 1500);
-
-    return {
-      data: `Based on the image analysis, I can see a trading chart showing price action with clear support and resistance levels. ${prompt}`,
-      provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  // ─── OCR Provider ───
-
-  async extractTradeData(
-    imageUrl: string,
-    options?: OCROptions & AIRequestOptions
-  ): Promise<AIResponse<OCRResult>> {
-    const processingTimeMs = await simulateProcessing(500, 1500);
-    const result = generateMockOCRResult();
-
-    return {
-      data: result,
-      provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  async extractText(imageUrl: string, options?: AIRequestOptions): Promise<AIResponse<string>> {
-    const processingTimeMs = await simulateProcessing(300, 800);
-
-    return {
-      data: "EURUSD Buy Entry: 1.08950 | Exit: 1.09120 | Profit: +85.00 | Date: 2024-01-15",
-      provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  // ─── Summary Provider ───
-
-  async summarizeTrade(tradeId: string, options?: AIRequestOptions): Promise<AIResponse<string>> {
-    const processingTimeMs = await simulateProcessing(600, 1200);
-    const summary = generateMockTradeSummary();
-
-    return {
-      data: summary.overview,
-      provider: "mock",
-      model: "mock-gpt-4",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  async summarizeTrades(tradeIds: string[], options?: AIRequestOptions): Promise<AIResponse<string>> {
-    const processingTimeMs = await simulateProcessing(800, 1500);
-
-    return {
-      data: `Analysis of ${tradeIds.length} trades shows an overall positive trend with good risk management. Win rate is 58% with an average R:R of 1:2.1. Key strength is patient entry timing. Main area for improvement is exit management - consider trailing stops.`,
-      provider: "mock",
-      model: "mock-gpt-4",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  // ─── Coaching Provider ───
-
-  async generateCoaching(
-    request: CoachingRequest,
-    options?: AIRequestOptions
-  ): Promise<AIResponse<CoachingResult>> {
-    const processingTimeMs = await simulateProcessing(1000, 2500);
-    const result = generateMockCoachingResult();
-
-    return {
-      data: result,
-      provider: "mock",
-      model: "mock-coach",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  async chat(message: string, sessionId?: string, options?: AIRequestOptions): Promise<AIResponse<CoachMessage>> {
-    const processingTimeMs = await simulateProcessing(500, 1200);
-
-    const responses = [
-      "That's a solid observation about the trend structure. Consider also checking the volume profile to confirm strength.",
-      "You're right to be cautious here. The risk-reward isn't ideal at this entry point. Waiting for a pullback might offer a better setup.",
-      "Looking at your recent trades, you've improved significantly in patience. Keep following your pre-trade checklist.",
-      "This pattern has a 72% success rate in backtesting when the volume confirms the breakout. Make sure to check that.",
-      "I notice you've been taking similar setups recently. Consider reviewing your journal to see what's working best.",
-    ];
-
-    const response: CoachMessage = {
-      id: `msg-${Date.now()}`,
-      role: "coach",
-      content: responses[Math.floor(Math.random() * responses.length)],
-      timestamp: new Date().toISOString(),
+    const riskAssessment: RiskAssessment = {
+      riskRewardRatio: [1.5, 2.0, 2.5, 3.0][Math.floor(Math.random() * 4)],
+      riskPercent: [0.5, 1.0, 1.5, 2.0][Math.floor(Math.random() * 4)],
+      potentialProfit: 0,
+      potentialLoss: 0,
+      assessment: "Moderate risk setup with decent risk-reward ratio.",
+      recommendation: "Proceed with proper position sizing.",
     };
 
     return {
-      data: response,
-      provider: "mock",
-      model: "mock-coach",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
+      patterns,
+      keyLevels,
+      marketContext,
+      riskAssessment,
+      confidence: generateMockConfidenceScore(),
+      metadata: {
+        analysisVersion: "1.0.0-mock",
+        analyzedAt: new Date().toISOString(),
+        provider: "mock",
+      },
     };
   }
 
-  // ─── Transcription Provider ───
+  async detectPatterns(
+    _request: ChartAnalysisRequest,
+    _options?: AIRequestOptions
+  ): Promise<ChartPattern[]> {
+    await simulateProcessing(400, 800);
 
-  async transcribe(
-    request: TranscriptionRequest,
-    options?: AIRequestOptions
-  ): Promise<AIResponse<VoiceTranscript>> {
-    const processingTimeMs = await simulateProcessing(600, 1800);
-    const result = generateMockTranscript();
+    return mockChartPatterns
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3)
+      .map((p) => ({
+        pattern: p.pattern,
+        confidence: p.confidence,
+        direction: p.direction,
+        description: p.description,
+      }));
+  }
+
+  async identifyKeyLevels(
+    _request: ChartAnalysisRequest,
+    _options?: AIRequestOptions
+  ): Promise<KeyLevel[]> {
+    await simulateProcessing(300, 600);
+
+    return mockSupportResistance.map((level) => ({
+      type: level.type,
+      price: level.level,
+      strength: level.strength,
+      touches: level.touches,
+    }));
+  }
+
+  async assessMarketContext(
+    _request: ChartAnalysisRequest,
+    _options?: AIRequestOptions
+  ): Promise<MarketContext> {
+    await simulateProcessing(300, 500);
 
     return {
-      data: result,
-      provider: "mock",
-      model: "mock-gpt-4",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
+      trend: pickRandom(["bullish", "bearish", "sideways"]),
+      volatility: pickRandom(["low", "moderate", "high"]),
+      volume: pickRandom(["below_average", "average", "above_average"]),
+      session: "london_ny_overlap",
+      keyEvents: ["Fed speakers scheduled"].filter(() => Math.random() > 0.5),
     };
-  }
-
-  supportsRealtime(): boolean {
-    return false;
   }
 
   // ─── Chart Analysis Provider ───
 
-  async analyze(
+  async analyzeChartRequest(
     request: ChartAnalysisRequest,
     options?: AIRequestOptions
   ): Promise<AIResponse<ChartAnalysisResult>> {
-    return this.analyzeChart(request, options);
+    return this.analyzeChart(request, options).then((data) => ({
+      data,
+      provider: "mock",
+      model: "mock-gpt-4",
+      processingTimeMs: 1000,
+      timestamp: new Date().toISOString(),
+    }));
+  }
+
+  // Satisfy both ChartAnalysisProvider and TradeAnalysisProvider with a unified analyze
+  async analyze(
+    request: ChartAnalysisRequest | TradeAnalysisRequest,
+    options?: AIRequestOptions
+  ): Promise<AIResponse<ChartAnalysisResult | TradeAnalysisResult>> {
+    // Check if it's a ChartAnalysisRequest by looking for chart-specific properties
+    if ("imageUrl" in request || "chartImage" in request) {
+      const result = await this.analyzeChart(request as ChartAnalysisRequest, options);
+      return result as AIResponse<ChartAnalysisResult | TradeAnalysisResult>;
+    }
+    // Otherwise treat as TradeAnalysisRequest
+    return this.analyzeTrade(request as TradeAnalysisRequest, options) as Promise<AIResponse<ChartAnalysisResult | TradeAnalysisResult>>;
   }
 
   async detectPatterns(
-    imageUrl: string,
+    request: ChartAnalysisRequest,
     options?: AIRequestOptions
-  ): Promise<AIResponse<ChartAnalysisResult["patterns"]>> {
-    const processingTimeMs = await simulateProcessing(600, 1500);
-    const analysis = generateMockChartAnalysis();
-
+  ): Promise<AIResponse<ChartPattern[]>> {
+    const patterns = await this.detectPatterns(request, options);
     return {
-      data: analysis.patterns,
+      data: patterns,
       provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
+      model: "mock-gpt-4",
+      processingTimeMs: 500,
       timestamp: new Date().toISOString(),
     };
   }
 
-  async identifyLevels(
-    imageUrl: string,
-    options?: AIRequestOptions
-  ): Promise<AIResponse<ChartAnalysisResult["supportResistance"]>> {
-    const processingTimeMs = await simulateProcessing(500, 1200);
-    const analysis = generateMockChartAnalysis();
+  // ─── Trade Analysis ───
 
-    return {
-      data: analysis.supportResistance,
-      provider: "mock",
-      model: "mock-vision",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  // ─── Trade Analysis Provider ───
-
-  async analyze(
-    request: TradeAnalysisRequest,
-    options?: AIRequestOptions
+  async analyzeTrade(
+    _request: TradeAnalysisRequest,
+    _options?: AIRequestOptions
   ): Promise<AIResponse<TradeAnalysisResult>> {
     const processingTimeMs = await simulateProcessing(800, 2000);
 
@@ -331,21 +239,146 @@ export class MockProvider
     };
   }
 
-  async scoreTrade(
-    tradeId: string,
+  // ─── Screenshot Analysis ───
+
+  async analyzeScreenshot(
+    imageFile: File,
     options?: AIRequestOptions
-  ): Promise<AIResponse<TradeAnalysisResult["score"]>> {
-    const processingTimeMs = await simulateProcessing(400, 800);
+  ): Promise<ScreenshotAnalysis> {
+    const startTime = Date.now();
+
+    this.processingState = {
+      status: "processing",
+      progress: 0,
+      message: "Analyzing screenshot...",
+    };
+
+    // Simulate progressive processing
+    for (let i = 0; i <= 100; i += 20) {
+      if (options?.signal?.aborted) {
+        throw new Error("Analysis was cancelled");
+      }
+      this.processingState.progress = i;
+      await simulateProcessing(100, 300);
+    }
+
+    const processingTimeMs = Date.now() - startTime;
+
+    const detectedPrices: DetectedPrice[] = [
+      { value: 1.0850, text: "1.0850", position: 10, confidence: 0.95 },
+      { value: 1.0920, text: "1.0920", position: 25, confidence: 0.88 },
+      { value: 1.0780, text: "1.0780", position: 40, confidence: 0.82 },
+    ];
+
+    const fieldStatuses: ExtractedFieldStatus[] = [
+      { field: "pair", detected: true, confidence: 0.92, source: "fuzzy_match" },
+      { field: "direction", detected: true, confidence: 0.85, source: "explicit_label" },
+      { field: "entryPrice", detected: true, confidence: 0.88, source: "explicit_label" },
+      { field: "stopLoss", detected: true, confidence: 0.9, source: "explicit_label" },
+      { field: "takeProfit", detected: true, confidence: 0.87, source: "explicit_label" },
+      { field: "positionSize", detected: false, confidence: 0, source: "none" },
+    ];
+
+    const tradeData: ExtractedTradeData = {
+      pair: "EURUSD",
+      direction: "buy",
+      entryPrice: 1.0850,
+      exitPrice: null,
+      stopLoss: 1.0820,
+      takeProfit: 1.0920,
+      positionSize: null,
+      confidence: 87,
+      confidenceLevel: "high",
+      source: "mock_analysis",
+      method: "pattern_recognition",
+      detectedPrices,
+      fieldStatuses,
+    };
+
+    this.processingState = {
+      status: "completed",
+      progress: 100,
+      message: "Analysis complete",
+      endTime: new Date().toISOString(),
+    };
 
     return {
-      data: generateMockTradeScore(),
+      id: generateMockId("analysis"),
+      screenshotId: generateMockId("screenshot"),
+      tradeData,
+      detectedSetup: pickRandom([
+        "Support bounce with bullish engulfing",
+        "Breakout from consolidation range",
+        "Fibonacci retracement entry",
+        "Trend line support touch",
+      ]),
+      marketContext: pickRandom([
+        "Bullish trend on daily timeframe. Price approaching key resistance.",
+        "Sideways consolidation after strong uptrend. Awaiting breakout.",
+        "Bearish correction in larger uptrend. Potential buying opportunity.",
+      ]),
+      keyLevels: [
+        { type: "support", price: 1.0820, confidence: 90, description: "Previous swing low" },
+        { type: "resistance", price: 1.0920, confidence: 85, description: "Recent high" },
+        { type: "entry", price: 1.0850, confidence: 88, description: "Current price" },
+      ],
+      riskAssessment: {
+        riskRewardRatio: 2.3,
+        riskPercent: 1.0,
+        potentialProfit: 70,
+        potentialLoss: 30,
+        assessment: "Favorable risk-reward setup with clear technical levels.",
+        recommendation: "Proceed with standard position sizing.",
+      },
+      confidence: 87,
+      confidenceLevel: "high",
+      processingTimeMs,
       provider: "mock",
       model: "mock-gpt-4",
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
+      analyzedAt: new Date().toISOString(),
+      status: "completed",
     };
+  }
+
+  // ─── Processing Provider ───
+
+  async getProcessingState(): Promise<AIProcessingState> {
+    return { ...this.processingState };
+  }
+
+  async cancelProcessing(): Promise<void> {
+    this.processingState = {
+      status: "pending",
+      progress: 0,
+      message: "Processing cancelled",
+    };
+  }
+
+  // ─── Utility ───
+
+  async getStatus(): Promise<{ available: boolean; message: string }> {
+    return {
+      available: true,
+      message: "Mock provider is ready (development mode)",
+    };
+  }
+
+  async validateConfig(): Promise<{ valid: boolean; errors: string[] }> {
+    return { valid: true, errors: [] };
   }
 }
 
-// Singleton instance for easy access
-export const mockProvider = new MockProvider();
+// ─── Singleton Instance ───
+
+let mockProviderInstance: MockAnalysisProvider | null = null;
+
+export function getMockProvider(): MockAnalysisProvider {
+  if (!mockProviderInstance) {
+    mockProviderInstance = new MockAnalysisProvider();
+  }
+  return mockProviderInstance;
+}
+
+// ─── Re-export for convenience ───
+
+export { mockCoachingData, mockChartPatterns, mockSupportResistance };
