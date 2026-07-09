@@ -7,6 +7,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import AppLayout from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -385,6 +386,7 @@ export default function AIVoiceNotes() {
 
   if (!canAccess) {
     return (
+    <AppLayout>
       <div className="space-y-6 animate-in fade-in">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -395,7 +397,8 @@ export default function AIVoiceNotes() {
         </div>
         <LockedFeature />
       </div>
-    );
+    
+    </AppLayout>);
   }
 
   const showTranscriptPanel = recorder.state === "recording" || recorder.state === "paused";

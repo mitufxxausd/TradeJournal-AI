@@ -68,6 +68,18 @@ const WATERMARK_PATTERNS = [
   /icmarkets/gi,
 ] as const;
 
+/** Number patterns that suggest chart scale rather than trade levels */
+const CHART_SCALE_PATTERNS = [
+  // Sequential price ladder (3+ prices in ascending/descending order with similar spacing)
+  /^\s*\d+\.\d+\s*$/gm,  // Single price per line (price axis style)
+  // Percentage values
+  /-?\d+\.?\d*\s*%/g,
+  // Very large numbers (unlikely to be trade prices for most pairs)
+  /\b\d{7,}\b/g,
+  // Numbers followed by common indicator suffixes
+  /\b\d+\.?\d*\s*(?:rsi|macd|ema\d*|sma\d*|atr|pips?|ticks?)\b/gi,
+] as const;
+
 // ─── Symbol/Pair Extraction ───
 
 function extractSymbol(text: string): { symbol: string; confidence: number } {
@@ -162,6 +174,12 @@ function extractPricesWithContext(text: string): DetectedPrice[] {
   const prices: DetectedPrice[] = [];
   const seen = new Set<number>();
   const lines = text.split(/\n/);
+
+  // Build a map of line numbers for context analysis
+  const lineMap: { line: string; lineNum: number }[] = lines.map((line, idx) => ({
+    line: line.trim(),
+    lineNum: idx,
+  }));
 
   // Find all numeric patterns with their positions
   const allMatches: {
