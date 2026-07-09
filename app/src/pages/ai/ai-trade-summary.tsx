@@ -330,16 +330,18 @@ export default function AITradeSummary() {
 
   if (!canAccess) {
     return (
-      <div className="space-y-6 animate-in fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <ClipboardList className="h-7 w-7 text-primary" />
-            Trade Summary
-          </h1>
-          <p className="mt-1 text-muted-foreground">Trade performance summary</p>
+      <AppLayout>
+        <div className="space-y-6 animate-in fade-in">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+              <ClipboardList className="h-7 w-7 text-primary" />
+              Trade Summary
+            </h1>
+            <p className="mt-1 text-muted-foreground">Trade performance summary</p>
+          </div>
+          <LockedFeature />
         </div>
-        <LockedFeature />
-      </div>
+      </AppLayout>
     );
   }
 

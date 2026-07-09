@@ -1,11 +1,3 @@
-/**
- * AI Voice Notes Page
- * Real voice recording with MediaRecorder API and browser SpeechRecognition API.
- * No simulated recording - only real browser APIs.
- * Features: Record, Pause, Resume, Stop, Edit transcript, Save, Attach to trade.
- * Graceful fallback when APIs are unsupported.
- */
-
 import { useState, useRef, useCallback, useEffect } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -386,404 +378,406 @@ export default function AIVoiceNotes() {
 
   if (!canAccess) {
     return (
-    <AppLayout>
-      <div className="space-y-6 animate-in fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Mic className="h-7 w-7 text-primary" />
-            Voice Notes
-          </h1>
-          <p className="mt-1 text-muted-foreground">Record and transcribe trading notes</p>
+      <AppLayout>
+        <div className="space-y-6 animate-in fade-in">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+              <Mic className="h-7 w-7 text-primary" />
+              Voice Notes
+            </h1>
+            <p className="mt-1 text-muted-foreground">Record and transcribe trading notes</p>
+          </div>
+          <LockedFeature />
         </div>
-        <LockedFeature />
-      </div>
-    
-    </AppLayout>);
+      </AppLayout>
+    );
   }
 
   const showTranscriptPanel = recorder.state === "recording" || recorder.state === "paused";
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-          <Mic className="h-7 w-7 text-primary" />
-          Voice Notes
-        </h1>
-        <p className="mt-1 text-muted-foreground">
-          Record, playback, transcribe, and manage your trading voice notes
-        </p>
-      </div>
-
-      {/* Unsupported Banner */}
-      {!isMediaSupported && <UnsupportedBanner />}
-
-      {/* Real Feature Banner */}
-      <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 flex items-start gap-3">
-        <Sparkles className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+    <AppLayout>
+      <div className="space-y-6 animate-in fade-in duration-500">
+        {/* Header */}
         <div>
-          <h4 className="font-semibold text-sm text-green-700 dark:text-green-400">Real Voice Recording</h4>
-          <p className="text-sm text-muted-foreground mt-1">
-            Uses your browser&apos;s MediaRecorder API for audio capture and
-            Web Speech API for real-time transcription. All data stays local.
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Mic className="h-7 w-7 text-primary" />
+            Voice Notes
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            Record, playback, transcribe, and manage your trading voice notes
           </p>
         </div>
-      </div>
 
-      {/* Recording Controls */}
-      <Card className="border-primary/20">
-        <CardContent className="p-6">
-          <div className="flex flex-col items-center gap-4">
-            {/* Waveform */}
-            <div className="flex items-center justify-center h-12 w-full">
-              {recorder.state === "recording" && <RecordingWaveform />}
-              {recorder.state === "paused" && <PausedWaveform />}
-              {(recorder.state === "idle" || recorder.state === "stopped") && (
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: 30 }).map((_, i) => (
-                    <div key={i} className="w-0.5 h-2 bg-muted-foreground/20 rounded-full" />
-                  ))}
-                </div>
-              )}
-            </div>
+        {/* Unsupported Banner */}
+        {!isMediaSupported && <UnsupportedBanner />}
 
-            {/* Timer */}
-            <div className="text-center">
-              <div className={cn(
-                "text-4xl font-mono font-bold tabular-nums tracking-wider",
-                recorder.state === "recording" && "text-red-500 animate-pulse"
-              )}>
-                {formatDuration(recorder.state === "idle" ? 0 : recorder.duration)}
-              </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                {recorder.state === "idle" && "Tap to start recording"}
-                {recorder.state === "recording" && "Recording..."}
-                {recorder.state === "paused" && "Paused"}
-                {recorder.state === "stopped" && "Recording complete"}
-              </p>
-            </div>
-
-            {/* Error */}
-            {recorder.error && (
-              <p className="text-sm text-destructive text-center">{recorder.error}</p>
-            )}
-
-            {/* Control Buttons */}
-            <div className="flex items-center gap-3">
-              {recorder.state === "idle" && (
-                <Button
-                  size="lg"
-                  className="h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white p-0"
-                  onClick={handleStartRecording}
-                  disabled={!isMediaSupported}
-                >
-                  <Mic className="h-6 w-6" />
-                </Button>
-              )}
-
-              {recorder.state === "recording" && (
-                <>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="h-12 w-12 rounded-full p-0"
-                    onClick={handlePauseRecording}
-                  >
-                    <Pause className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    size="lg"
-                    className="h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white p-0"
-                    onClick={handleStopRecording}
-                  >
-                    <Square className="h-5 w-5" />
-                  </Button>
-                </>
-              )}
-
-              {recorder.state === "paused" && (
-                <>
-                  <Button
-                    size="lg"
-                    className="h-12 w-12 rounded-full p-0"
-                    onClick={handleResumeRecording}
-                  >
-                    <Play className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="h-12 w-12 rounded-full p-0 border-red-500 text-red-500 hover:bg-red-500/10"
-                    onClick={handleStopRecording}
-                  >
-                    <Square className="h-5 w-5" />
-                  </Button>
-                </>
-              )}
-
-              {recorder.state === "stopped" && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    className="h-12 w-12 rounded-full p-0"
-                    onClick={recorder.play}
-                    disabled={recorder.isPlaying}
-                  >
-                    {recorder.isPlaying ? (
-                      <div className="flex items-center gap-0.5">
-                        <div className="w-1 h-3 bg-current rounded-full animate-pulse" />
-                        <div className="w-1 h-3 bg-current rounded-full animate-pulse" style={{ animationDelay: "0.1s" }} />
-                      </div>
-                    ) : (
-                      <Play className="h-5 w-5" />
-                    )}
-                  </Button>
-                  <Button
-                    size="lg"
-                    className="h-12 w-12 rounded-full p-0"
-                    onClick={handleSaveRecording}
-                  >
-                    <Check className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="lg"
-                    className="h-12 w-12 rounded-full p-0"
-                    onClick={() => {
-                      recorder.reset();
-                      speech.reset();
-                    }}
-                  >
-                    <RotateCcw className="h-5 w-5" />
-                  </Button>
-                </>
-              )}
-            </div>
-
-            {/* Live Transcript during recording */}
-            {showTranscriptPanel && (
-              <div className="w-full max-w-lg">
-                <div className="rounded-lg border bg-muted/50 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Live Transcript
-                    </span>
-                    {speech.isListening && (
-                      <Badge variant="secondary" className="text-xs animate-pulse">
-                        Listening
-                      </Badge>
-                    )}
-                    {!speech.isSupported && (
-                      <Badge variant="outline" className="text-xs text-amber-500">
-                        Transcription unavailable
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-sm min-h-[2rem]">
-                    {speech.transcript}
-                    {speech.interimTranscript && (
-                      <span className="text-muted-foreground"> {speech.interimTranscript}</span>
-                    )}
-                    {!speech.transcript && !speech.interimTranscript && (
-                      <span className="text-muted-foreground italic">
-                        {speech.isUnsupported
-                          ? "Speech recognition not supported in this browser. Try Chrome or Edge."
-                          : "Speak now..."}
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Speech recognition not supported warning */}
-            {recorder.state === "idle" && speech.isUnsupported && (
-              <div className="flex items-center gap-2 text-sm text-amber-600">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Speech recognition not supported. Recording works, but transcription is unavailable.</span>
-              </div>
-            )}
+        {/* Real Feature Banner */}
+        <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 flex items-start gap-3">
+          <Sparkles className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-semibold text-sm text-green-700 dark:text-green-400">Real Voice Recording</h4>
+            <p className="text-sm text-muted-foreground mt-1">
+              Uses your browser&apos;s MediaRecorder API for audio capture and
+              Web Speech API for real-time transcription. All data stays local.
+            </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      <Separator />
-
-      {/* Voice Notes List */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Saved Notes ({voiceNotes.length})</h2>
-
-        {voiceNotes.length === 0 && (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-              <AudioLines className="h-10 w-10 text-muted-foreground mb-3" />
-              <p className="text-sm font-medium">No voice notes yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Record your first voice note above</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {voiceNotes.map((note) => (
-          <Card
-            key={note.id}
-            className={cn(
-              "transition-all hover:shadow-md",
-              expandedNote === note.id && "border-primary/50 ring-1 ring-primary/20"
-            )}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center gap-4">
-                {/* Play/Pause Button */}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className={cn(
-                    "h-10 w-10 rounded-full shrink-0",
-                    playingId === note.id && "bg-primary text-primary-foreground"
-                  )}
-                  onClick={() => handlePlay(note)}
-                >
-                  {playingId === note.id ? (
-                    <Pause className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4 ml-0.5" />
-                  )}
-                </Button>
-
-                {/* Note Info */}
-                <div className="flex-1 min-w-0">
-                  {editingId === note.id ? (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="h-8 text-sm"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSaveEdit(note);
-                          if (e.key === "Escape") handleCancelEdit();
-                        }}
-                      />
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleSaveEdit(note)}>
-                        <Check className="h-4 w-4 text-green-500" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCancelEdit}>
-                        <X className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium text-sm truncate">{note.name}</h3>
-                      {note.transcribed && (
-                        <Badge variant="secondary" className="text-xs shrink-0">
-                          <Sparkles className="h-3 w-3 mr-1" />
-                          Transcribed
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatDuration(note.duration)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(note.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground"
-                    onClick={() => handleCopyTranscript(note.transcript)}
-                    title="Copy transcript"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground"
-                    onClick={() => handleStartEdit(note)}
-                    disabled={editingId === note.id}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                    onClick={() => handleDelete(note.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Transcript Panel */}
-              <div className="mt-4 pt-4 border-t">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    <FileText className="h-3 w-3" />
-                    Transcript
-                  </h4>
-                  {note.transcript && editingTranscript !== note.id && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs gap-1"
-                        onClick={() => handleStartEditTranscript(note)}
-                      >
-                        <Pencil className="h-3 w-3" />
-                        Edit
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {editingTranscript === note.id ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      value={editTranscriptValue}
-                      onChange={(e) => setEditTranscriptValue(e.target.value)}
-                      className="min-h-[80px] text-sm"
-                      placeholder="Edit transcript..."
-                    />
-                    <div className="flex items-center gap-2 justify-end">
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancelEditTranscript}>
-                        <X className="h-3 w-3 mr-1" />
-                        Cancel
-                      </Button>
-                      <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveTranscript(note.id)}>
-                        <Save className="h-3 w-3 mr-1" />
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                ) : note.transcript ? (
-                  <p className="text-sm text-muted-foreground bg-muted rounded-lg p-3">
-                    {note.transcript}
-                  </p>
-                ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted rounded-lg p-3">
-                    <Info className="h-4 w-4" />
-                    <span>No transcript available.</span>
+        {/* Recording Controls */}
+        <Card className="border-primary/20">
+          <CardContent className="p-6">
+            <div className="flex flex-col items-center gap-4">
+              {/* Waveform */}
+              <div className="flex items-center justify-center h-12 w-full">
+                {recorder.state === "recording" && <RecordingWaveform />}
+                {recorder.state === "paused" && <PausedWaveform />}
+                {(recorder.state === "idle" || recorder.state === "stopped") && (
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: 30 }).map((_, i) => (
+                      <div key={i} className="w-0.5 h-2 bg-muted-foreground/20 rounded-full" />
+                    ))}
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
-        ))}
+
+              {/* Timer */}
+              <div className="text-center">
+                <div className={cn(
+                  "text-4xl font-mono font-bold tabular-nums tracking-wider",
+                  recorder.state === "recording" && "text-red-500 animate-pulse"
+                )}>
+                  {formatDuration(recorder.state === "idle" ? 0 : recorder.duration)}
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {recorder.state === "idle" && "Tap to start recording"}
+                  {recorder.state === "recording" && "Recording..."}
+                  {recorder.state === "paused" && "Paused"}
+                  {recorder.state === "stopped" && "Recording complete"}
+                </p>
+              </div>
+
+              {/* Error */}
+              {recorder.error && (
+                <p className="text-sm text-destructive text-center">{recorder.error}</p>
+              )}
+
+              {/* Control Buttons */}
+              <div className="flex items-center gap-3">
+                {recorder.state === "idle" && (
+                  <Button
+                    size="lg"
+                    className="h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white p-0"
+                    onClick={handleStartRecording}
+                    disabled={!isMediaSupported}
+                  >
+                    <Mic className="h-6 w-6" />
+                  </Button>
+                )}
+
+                {recorder.state === "recording" && (
+                  <>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12 w-12 rounded-full p-0"
+                      onClick={handlePauseRecording}
+                    >
+                      <Pause className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      size="lg"
+                      className="h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white p-0"
+                      onClick={handleStopRecording}
+                    >
+                      <Square className="h-5 w-5" />
+                    </Button>
+                  </>
+                )}
+
+                {recorder.state === "paused" && (
+                  <>
+                    <Button
+                      size="lg"
+                      className="h-12 w-12 rounded-full p-0"
+                      onClick={handleResumeRecording}
+                    >
+                      <Play className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12 w-12 rounded-full p-0 border-red-500 text-red-500 hover:bg-red-500/10"
+                      onClick={handleStopRecording}
+                    >
+                      <Square className="h-5 w-5" />
+                    </Button>
+                  </>
+                )}
+
+                {recorder.state === "stopped" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      className="h-12 w-12 rounded-full p-0"
+                      onClick={recorder.play}
+                      disabled={recorder.isPlaying}
+                    >
+                      {recorder.isPlaying ? (
+                        <div className="flex items-center gap-0.5">
+                          <div className="w-1 h-3 bg-current rounded-full animate-pulse" />
+                          <div className="w-1 h-3 bg-current rounded-full animate-pulse" style={{ animationDelay: "0.1s" }} />
+                        </div>
+                      ) : (
+                        <Play className="h-5 w-5" />
+                      )}
+                    </Button>
+                    <Button
+                      size="lg"
+                      className="h-12 w-12 rounded-full p-0"
+                      onClick={handleSaveRecording}
+                    >
+                      <Check className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="lg"
+                      className="h-12 w-12 rounded-full p-0"
+                      onClick={() => {
+                        recorder.reset();
+                        speech.reset();
+                      }}
+                    >
+                      <RotateCcw className="h-5 w-5" />
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* Live Transcript during recording */}
+              {showTranscriptPanel && (
+                <div className="w-full max-w-lg">
+                  <div className="rounded-lg border bg-muted/50 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Live Transcript
+                      </span>
+                      {speech.isListening && (
+                        <Badge variant="secondary" className="text-xs animate-pulse">
+                          Listening
+                        </Badge>
+                      )}
+                      {!speech.isSupported && (
+                        <Badge variant="outline" className="text-xs text-amber-500">
+                          Transcription unavailable
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm min-h-[2rem]">
+                      {speech.transcript}
+                      {speech.interimTranscript && (
+                        <span className="text-muted-foreground"> {speech.interimTranscript}</span>
+                      )}
+                      {!speech.transcript && !speech.interimTranscript && (
+                        <span className="text-muted-foreground italic">
+                          {speech.isUnsupported
+                            ? "Speech recognition not supported in this browser. Try Chrome or Edge."
+                            : "Speak now..."}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Speech recognition not supported warning */}
+              {recorder.state === "idle" && speech.isUnsupported && (
+                <div className="flex items-center gap-2 text-sm text-amber-600">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Speech recognition not supported. Recording works, but transcription is unavailable.</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Separator />
+
+        {/* Voice Notes List */}
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Saved Notes ({voiceNotes.length})</h2>
+
+          {voiceNotes.length === 0 && (
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+                <AudioLines className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="text-sm font-medium">No voice notes yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Record your first voice note above</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {voiceNotes.map((note) => (
+            <Card
+              key={note.id}
+              className={cn(
+                "transition-all hover:shadow-md",
+                expandedNote === note.id && "border-primary/50 ring-1 ring-primary/20"
+              )}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  {/* Play/Pause Button */}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn(
+                      "h-10 w-10 rounded-full shrink-0",
+                      playingId === note.id && "bg-primary text-primary-foreground"
+                    )}
+                    onClick={() => handlePlay(note)}
+                  >
+                    {playingId === note.id ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4 ml-0.5" />
+                    )}
+                  </Button>
+
+                  {/* Note Info */}
+                  <div className="flex-1 min-w-0">
+                    {editingId === note.id ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-8 text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEdit(note);
+                            if (e.key === "Escape") handleCancelEdit();
+                          }}
+                        />
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleSaveEdit(note)}>
+                          <Check className="h-4 w-4 text-green-500" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCancelEdit}>
+                          <X className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-medium text-sm truncate">{note.name}</h3>
+                        {note.transcribed && (
+                          <Badge variant="secondary" className="text-xs shrink-0">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Transcribed
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatDuration(note.duration)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(note.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground"
+                      onClick={() => handleCopyTranscript(note.transcript)}
+                      title="Copy transcript"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground"
+                      onClick={() => handleStartEdit(note)}
+                      disabled={editingId === note.id}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-red-500"
+                      onClick={() => handleDelete(note.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Transcript Panel */}
+                <div className="mt-4 pt-4 border-t">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      <FileText className="h-3 w-3" />
+                      Transcript
+                    </h4>
+                    {note.transcript && editingTranscript !== note.id && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={() => handleStartEditTranscript(note)}
+                        >
+                          <Pencil className="h-3 w-3" />
+                          Edit
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {editingTranscript === note.id ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={editTranscriptValue}
+                        onChange={(e) => setEditTranscriptValue(e.target.value)}
+                        className="min-h-[80px] text-sm"
+                        placeholder="Edit transcript..."
+                      />
+                      <div className="flex items-center gap-2 justify-end">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={handleCancelEditTranscript}>
+                          <X className="h-3 w-3 mr-1" />
+                          Cancel
+                        </Button>
+                        <Button size="sm" className="h-7 text-xs" onClick={() => handleSaveTranscript(note.id)}>
+                          <Save className="h-3 w-3 mr-1" />
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ) : note.transcript ? (
+                    <p className="text-sm text-muted-foreground bg-muted rounded-lg p-3">
+                      {note.transcript}
+                    </p>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted rounded-lg p-3">
+                      <Info className="h-4 w-4" />
+                      <span>No transcript available.</span>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
-    </div>
+    </AppLayout>
   );
 }
