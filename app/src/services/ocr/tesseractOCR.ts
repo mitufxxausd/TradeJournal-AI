@@ -2,9 +2,15 @@
  * Tesseract OCR Provider
  * Implements the OCRProvider interface using Tesseract.js.
  * Supports lazy loading of the Tesseract engine for better performance.
+ *
+ * Architecture:
+ *   Image → Preprocess → Tesseract OCR → Raw Text + Confidence → Parser
+ *
+ * This provider ONLY extracts text. It does not understand charts or trades.
+ * The Parser layer handles all trade data extraction logic.
  */
 
-import type { OCROptions, OCRResult } from "./types";
+import type { OCROptions, OCRResult, OCRProvider } from "./types";
 import { parseOCRText, cleanOCRText } from "./parser";
 
 // ─── Lazy-loaded Tesseract module ───
@@ -45,6 +51,58 @@ export function preloadTesseract(): void {
     });
   }
 }
+
+// ─── Tesseract OCR Provider Implementation ───
+
+class TesseractOCRProvider implements OCRProvider {
+  readonly name = "Tesseract.js";
+
+  async extractText(
+    imageFile: File,
+    options: OCROptions = {}
+  ): Promise<{
+    text: string;
+    confidence: number;
+    processingTimeMs: number;
+  }> {
+    const { language = "eng", imageQuality = "medium", onProgress } = options;
+    const startTime = Date.now();
+
+    // Lazy load Tesseract
+    const Tesseract = await getTesseract();
+
+    // Preprocess image
+    const { dataUrl } = await preprocessImage(imageFile, imageQuality);
+
+    // Run OCR
+    const result = await Tesseract.recognize(dataUrl, language, {
+      logger: (m: { status: string; progress: number }) => {
+        if (m.status === "recognizing text" && onProgress) {
+          onProgress(Math.round(m.progress * 100));
+        }
+      },
+    });
+
+    const processingTimeMs = Date.now() - startTime;
+
+    // Clean the OCR text
+    const cleanedText = cleanOCRText(result.data.text);
+
+    return {
+      text: cleanedText,
+      confidence: result.data.confidence,
+      processingTimeMs,
+    };
+  }
+
+  cancel(): void {
+    // Tesseract.js worker termination happens automatically
+    // Future: implement AbortController for true cancellation
+  }
+}
+
+// Singleton instance
+const tesseractProvider = new TesseractOCRProvider();
 
 // ─── Image Preprocessing ───
 
@@ -141,6 +199,7 @@ async function preprocessImage(
 /**
  * Extract raw text from an image using Tesseract.js.
  * This is the low-level OCR function that just returns text.
+ * Implements the OCRProvider interface.
  */
 export async function extractTextFromImage(
   imageFile: File,
@@ -150,39 +209,7 @@ export async function extractTextFromImage(
   confidence: number;
   processingTimeMs: number;
 }> {
-  const { language = "eng", imageQuality = "medium", onProgress } = options;
-  const startTime = Date.now();
-
-  try {
-    // Lazy load Tesseract
-    const Tesseract = await getTesseract();
-
-    // Preprocess image
-    const { dataUrl } = await preprocessImage(imageFile, imageQuality);
-
-    // Run OCR
-    const result = await Tesseract.recognize(dataUrl, language, {
-      logger: (m: { status: string; progress: number }) => {
-        if (m.status === "recognizing text" && onProgress) {
-          onProgress(Math.round(m.progress * 100));
-        }
-      },
-    });
-
-    const processingTimeMs = Date.now() - startTime;
-
-    // Clean the OCR text
-    const cleanedText = cleanOCRText(result.data.text);
-
-    return {
-      text: cleanedText,
-      confidence: result.data.confidence,
-      processingTimeMs,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "OCR failed";
-    throw new Error(`OCR extraction failed: ${message}`);
-  }
+  return tesseractProvider.extractText(imageFile, options);
 }
 
 // ─── Main OCR Function ───
@@ -190,6 +217,10 @@ export async function extractTextFromImage(
 /**
  * Run full OCR and trade extraction on an image.
  * Uses the intelligent parser layer for trade data extraction.
+ *
+ * Pipeline:
+ *   Image → OCR Provider (Tesseract) → Raw Text + Confidence →
+ *   Parser → Trade Extraction → Validation → Trade Review → Import
  */
 export async function runOCR(
   imageFile: File,
@@ -198,7 +229,7 @@ export async function runOCR(
   const startTime = Date.now();
 
   try {
-    // Step 1: Extract raw text using Tesseract
+    // Step 1: Extract raw text using Tesseract (OCR Provider layer)
     const { text, confidence: ocrConfidence } = await extractTextFromImage(
       imageFile,
       options
@@ -214,10 +245,18 @@ export async function runOCR(
         confidenceLevel: "low",
         processingTimeMs: Date.now() - startTime,
         error: "No text detected in image",
+        qualityMetrics: {
+          ocrQuality: Math.round(ocrConfidence),
+          parserConfidence: 0,
+          tradeCompleteness: 0,
+          fieldsDetected: 0,
+          totalFields: 6,
+          detectedFields: [],
+        },
       };
     }
 
-    // Step 2: Parse the text using the intelligent parser
+    // Step 2: Parse the text using the intelligent parser (Parser layer)
     const parseResult = parseOCRText(text, ocrConfidence);
 
     return {
@@ -235,6 +274,14 @@ export async function runOCR(
       confidenceLevel: "low",
       processingTimeMs: Date.now() - startTime,
       error: message,
+      qualityMetrics: {
+        ocrQuality: 0,
+        parserConfidence: 0,
+        tradeCompleteness: 0,
+        fieldsDetected: 0,
+        totalFields: 6,
+        detectedFields: [],
+      },
     };
   }
 }
@@ -247,8 +294,15 @@ export async function runOCR(
  * so this is a best-effort implementation.
  */
 export function cancelOCR(): void {
-  // Tesseract.js worker termination happens automatically
-  // Future: implement AbortController for true cancellation
+  tesseractProvider.cancel();
+}
+
+/**
+ * Get the OCR provider instance.
+ * Use this for dependency injection and testing.
+ */
+export function getOCRProvider(): OCRProvider {
+  return tesseractProvider;
 }
 
 /**
