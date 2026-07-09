@@ -7,6 +7,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import AppLayout from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,9 +63,10 @@ interface ConfirmedTrade {
   direction: "buy" | "sell" | "unknown";
   entryPrice: number | null;
   stopLoss: number | null;
-  takeProfit: number[];
+  takeProfit: number | null;
   positionSize: number | null;
   confidence: number;
+  confidenceLevel: "high" | "medium" | "low";
   confirmed: boolean;
   discarded: boolean;
 }
@@ -99,6 +101,7 @@ function TradeEditor({
   onUpdate: (trade: ConfirmedTrade) => void;
 }) {
   return (
+    <AppLayout>
     <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -144,17 +147,19 @@ function TradeEditor({
           />
         </div>
         <div className="space-y-1 col-span-2">
-          <Label className="text-xs">Take Profit (comma-separated)</Label>
+          <Label className="text-xs">Take Profit</Label>
           <Input
-            value={trade.takeProfit.join(", ")}
+            type="number"
+            step="0.00001"
+            value={trade.takeProfit ?? ""}
             onChange={(e) =>
               onUpdate({
                 ...trade,
-                takeProfit: e.target.value.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v)),
+                takeProfit: e.target.value ? parseFloat(e.target.value) : null,
               })
             }
             className="h-8 text-sm font-mono"
-            placeholder="1.23456, 1.24500"
+            placeholder="1.23456"
           />
         </div>
         <div className="space-y-1">
@@ -170,7 +175,8 @@ function TradeEditor({
         </div>
       </div>
     </div>
-  );
+  
+    </AppLayout>);
 }
 
 // ─── Main Component ───
@@ -270,15 +276,23 @@ export default function AIScreenshotAnalysis() {
           takeProfit: trade.takeProfit,
           positionSize: trade.positionSize,
           confidence: trade.confidence,
+          confidenceLevel: result.confidenceLevel,
           confirmed: false,
           discarded: false,
         }));
         setConfirmedTrades((prev) => ({ ...prev, [id]: initialTrades }));
 
         const tradeCount = result.trades.length;
-        toast.success(
-          `OCR complete: ${tradeCount} trade${tradeCount > 1 ? "s" : ""} detected (${result.overallConfidence}% confidence)`
-        );
+        const confLevel = result.confidenceLevel;
+        const confMsg = confLevel === "high" ? "High confidence" :
+                       confLevel === "medium" ? "Medium confidence - review recommended" :
+                       "Low confidence - please review";
+
+        if (confLevel === "low") {
+          toast.warning(`OCR complete: ${tradeCount} trade${tradeCount > 1 ? "s" : ""} detected. ${confMsg} (${result.overallConfidence}%)`);
+        } else {
+          toast.success(`OCR complete: ${tradeCount} trade${tradeCount > 1 ? "s" : ""} detected. ${confMsg} (${result.overallConfidence}%)`);
+        }
       } else if (result.rawText) {
         toast.info(`Text detected (${result.overallConfidence}% confidence). No trade data found.`);
       } else {
@@ -326,17 +340,23 @@ export default function AIScreenshotAnalysis() {
 
   const handleAutoFill = (imageId: string, tradeId: string) => {
     const trade = confirmedTrades[imageId]?.find((t) => t.id === tradeId);
-    if (!trade || trade.symbol === "Unknown" && trade.entryPrice === null) {
+    if (!trade || (trade.symbol === "Unknown" && trade.entryPrice === null)) {
       toast.warning("No valid trade data to fill");
       return;
     }
 
+    // Check confidence level - warn if low
+    if (trade.confidenceLevel === "low") {
+      toast.error("Cannot auto-fill: OCR confidence is too low. Please review and edit the trade data first.");
+      return;
+    }
+
     const params = new URLSearchParams();
-    if (trade.symbol !== "Unknown") params.set("pair", trade.symbol);
+    if (trade.symbol !== "Unknown" && trade.symbol !== "") params.set("pair", trade.symbol);
     if (trade.direction !== "unknown") params.set("direction", trade.direction.toUpperCase());
     if (trade.entryPrice !== null) params.set("entryPrice", String(trade.entryPrice));
     if (trade.stopLoss !== null) params.set("stopLoss", String(trade.stopLoss));
-    if (trade.takeProfit.length > 0) params.set("takeProfit", String(trade.takeProfit[0]));
+    if (trade.takeProfit !== null) params.set("takeProfit", String(trade.takeProfit));
     if (trade.positionSize !== null) params.set("positionSize", String(trade.positionSize));
 
     window.location.hash = `#/trades/new?${params.toString()}`;
@@ -547,11 +567,35 @@ export default function AIScreenshotAnalysis() {
 
                       {image.ocrResult && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                          {/* Confidence Warning */}
+                          {image.ocrResult.warning && (
+                            <div className={cn(
+                              "rounded-lg border p-3 text-sm flex items-start gap-2",
+                              image.ocrResult.confidenceLevel === "low"
+                                ? "border-red-500/30 bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-200"
+                                : "border-amber-500/30 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                            )}>
+                              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>{image.ocrResult.warning}</span>
+                            </div>
+                          )}
+
                           {/* OCR Confidence */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-sm",
+                                  image.ocrResult.confidenceLevel === "high" && "border-green-500 text-green-700 bg-green-50 dark:bg-green-950/30",
+                                  image.ocrResult.confidenceLevel === "medium" && "border-amber-500 text-amber-700 bg-amber-50 dark:bg-amber-950/30",
+                                  image.ocrResult.confidenceLevel === "low" && "border-red-500 text-red-700 bg-red-50 dark:bg-red-950/30",
+                                )}
+                              >
                                 OCR Confidence: {image.ocrResult.overallConfidence}%
+                                {image.ocrResult.confidenceLevel === "high" && " - High"}
+                                {image.ocrResult.confidenceLevel === "medium" && " - Review"}
+                                {image.ocrResult.confidenceLevel === "low" && " - Poor"}
                               </Badge>
                               {trades.length > 0 && (
                                 <Badge className="bg-primary text-white">
@@ -616,7 +660,16 @@ export default function AIScreenshotAnalysis() {
                                               Unknown
                                             </Badge>
                                           )}
-                                          <Badge variant="outline">{trade.confidence}% confidence</Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              trade.confidenceLevel === "high" && "border-green-500 text-green-700 bg-green-50 dark:bg-green-950/30",
+                                              trade.confidenceLevel === "medium" && "border-amber-500 text-amber-700 bg-amber-50 dark:bg-amber-950/30",
+                                              trade.confidenceLevel === "low" && "border-red-500 text-red-700 bg-red-50 dark:bg-red-950/30",
+                                            )}
+                                          >
+                                            {trade.confidence}% confidence
+                                          </Badge>
                                           {isConfirmed && (
                                             <Badge className="bg-green-500 text-white gap-1">
                                               <Check className="h-3 w-3" />
@@ -668,6 +721,8 @@ export default function AIScreenshotAnalysis() {
                                             size="sm"
                                             className="h-8 gap-1"
                                             onClick={() => handleAutoFill(image.id, trade.id)}
+                                            disabled={trade.confidenceLevel === "low"}
+                                            title={trade.confidenceLevel === "low" ? "Cannot auto-fill: OCR confidence too low" : "Fill trade form with extracted data"}
                                           >
                                             <Plus className="h-3 w-3" />
                                             Auto Fill Trade
@@ -711,8 +766,8 @@ export default function AIScreenshotAnalysis() {
                                               <Target className="h-3 w-3" /> Take Profit
                                             </p>
                                             <p className="font-mono text-sm font-semibold text-green-500">
-                                              {trade.takeProfit.length > 0
-                                                ? trade.takeProfit.map((tp) => tp.toFixed(tp < 100 ? 5 : 2)).join(", ")
+                                              {trade.takeProfit !== null
+                                                ? trade.takeProfit.toFixed(trade.takeProfit < 100 ? 5 : 2)
                                                 : "Not detected"}
                                             </p>
                                           </div>

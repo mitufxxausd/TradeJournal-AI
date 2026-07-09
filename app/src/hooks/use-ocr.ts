@@ -1,11 +1,13 @@
 /**
  * useOCR Hook
- * Hook for running Tesseract.js OCR on images with progress tracking.
+ * Hook for running OCR on images with progress tracking.
+ * Uses the intelligent parser layer for trade extraction.
  */
 
 import { useState, useCallback, useRef } from "react";
-import { runOCR, cancelOCR } from "@/services/ocr";
+import { runOCR, cancelOCR, preloadTesseract } from "@/services/ocr";
 import type { OCRResult, OCROptions } from "@/services/ocr";
+import { CONFIDENCE_THRESHOLDS } from "@/services/ocr";
 
 export type OCRStatus = "idle" | "processing" | "completed" | "error";
 
@@ -17,9 +19,14 @@ export interface UseOCRReturn {
   run: (imageFile: File, options?: OCROptions) => Promise<OCRResult | null>;
   cancel: () => void;
   reset: () => void;
+  preload: () => void;
   isProcessing: boolean;
   isCompleted: boolean;
   isError: boolean;
+  /** Whether OCR confidence is high enough for auto-fill */
+  canAutoFill: boolean;
+  /** Human-readable confidence status message */
+  confidenceMessage: string | null;
 }
 
 export function useOCR(): UseOCRReturn {
@@ -85,6 +92,20 @@ export function useOCR(): UseOCRReturn {
     setError(null);
   }, []);
 
+  const preload = useCallback(() => {
+    preloadTesseract();
+  }, []);
+
+  // Derive auto-fill capability from confidence
+  const canAutoFill = result !== null &&
+    result.overallConfidence >= CONFIDENCE_THRESHOLDS.MEDIUM &&
+    result.confidenceLevel !== "low";
+
+  // Human-readable confidence message
+  const confidenceMessage = result
+    ? getConfidenceMessage(result)
+    : null;
+
   return {
     status,
     result,
@@ -93,8 +114,26 @@ export function useOCR(): UseOCRReturn {
     run,
     cancel,
     reset,
+    preload,
     isProcessing: status === "processing",
     isCompleted: status === "completed",
     isError: status === "error",
+    canAutoFill,
+    confidenceMessage,
   };
+}
+
+function getConfidenceMessage(result: OCRResult): string {
+  if (result.error) return `Error: ${result.error}`;
+
+  switch (result.confidenceLevel) {
+    case "high":
+      return `High confidence (${result.overallConfidence}%) - Results look reliable.`;
+    case "medium":
+      return `Medium confidence (${result.overallConfidence}%) - Please review before importing.`;
+    case "low":
+      return `Low confidence (${result.overallConfidence}%) - Please review OCR results before importing.`;
+    default:
+      return `Confidence: ${result.overallConfidence}%`;
+  }
 }

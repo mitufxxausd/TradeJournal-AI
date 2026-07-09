@@ -5,6 +5,7 @@
  */
 
 import { useState } from "react";
+import AppLayout from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -216,6 +217,7 @@ export default function AISettings() {
 
   if (!canAccess) {
     return (
+    <AppLayout>
       <div className="space-y-6 animate-in fade-in">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -226,7 +228,8 @@ export default function AISettings() {
         </div>
         <LockedFeature />
       </div>
-    );
+    
+    </AppLayout>);
   }
 
   return (

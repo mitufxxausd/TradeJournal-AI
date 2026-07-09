@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -161,6 +162,7 @@ export default function AISubscription() {
   };
 
   return (
+    <AppLayout>
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Header */}
       <div className="text-center max-w-2xl mx-auto">
@@ -353,5 +355,6 @@ export default function AISubscription() {
         </Card>
       </div>
     </div>
-  );
+  
+    </AppLayout>);
 }
