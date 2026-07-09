@@ -368,16 +368,18 @@ export default function AICoach() {
 
   if (!canAccess) {
     return (
-      <div className="space-y-6 animate-in fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Brain className="h-7 w-7 text-primary" />
-            AI Coach
-          </h1>
-          <p className="mt-1 text-muted-foreground">Personalized coaching from your trade history</p>
+      <AppLayout>
+        <div className="space-y-6 animate-in fade-in">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+              <Brain className="h-7 w-7 text-primary" />
+              AI Coach
+            </h1>
+            <p className="mt-1 text-muted-foreground">Personalized coaching from your trade history</p>
+          </div>
+          <LockedFeature />
         </div>
-        <LockedFeature />
-      </div>
+      </AppLayout>
     );
   }
 
