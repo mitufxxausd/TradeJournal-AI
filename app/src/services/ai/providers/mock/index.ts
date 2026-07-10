@@ -9,6 +9,7 @@ import type {
   AIResponse,
   AIProcessingStatus,
   SubscriptionTier,
+  AIModelInfo,
 } from "../../types/common";
 
 import type {
@@ -61,6 +62,7 @@ export class MockAnalysisProvider
   readonly version = "1.0.0";
   readonly providerId = "mock";
   readonly requiredTier: SubscriptionTier = "free";
+  readonly models: AIModelInfo[] = [];
 
   private processingState: AIProcessingStatus = {
     status: "idle",
@@ -338,6 +340,16 @@ export class MockAnalysisProvider
     };
   }
 
+  // ─── AIProvider Interface Requirements ───
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  getModels(): AIModelInfo[] {
+    return this.models;
+  }
+
   // ─── Utility ───
 
   async getStatus(): Promise<{ available: boolean; message: string }> {
@@ -349,15 +361,6 @@ export class MockAnalysisProvider
 
   async validateConfig(): Promise<{ valid: boolean; errors: string[] }> {
     return { valid: true, errors: [] };
-  }
-
-  // Satisfy AIProvider interface from ../interfaces
-  async isAvailable(): Promise<boolean> {
-    return true;
-  }
-
-  getModels() {
-    return [];
   }
 }
 
