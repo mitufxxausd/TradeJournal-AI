@@ -1,108 +1,54 @@
 /**
- * Tesseract OCR Provider
- * Implements the OCRProvider interface using Tesseract.js.
- * Supports lazy loading of the Tesseract engine for better performance.
+ * Tesseract OCR Integration
+ * Phase 7C Enhanced: Multi-pass OCR with advanced preprocessing
  *
- * Architecture:
- *   Image → Preprocess → Tesseract OCR → Raw Text + Confidence → Parser
- *
- * This provider ONLY extracts text. It does not understand charts or trades.
- * The Parser layer handles all trade data extraction logic.
+ * Pipeline:
+ *   Image → Enhanced Preprocessing → Multi-Pass OCR →
+ *   Text Merge → Parser → Trade Extraction → Validation
  */
 
-import type { OCROptions, OCRResult, OCRProvider } from "./types";
-import { parseOCRText, cleanOCRText } from "./parser";
+import type { OCRResult, OCRTrade, OCRQualityMetrics } from "./types";
+import { parseOCRText } from "./parser";
 
-// ─── Lazy-loaded Tesseract module ───
+// ─── Tesseract Lazy Loading ───
 
-let TesseractModule: typeof import("tesseract.js") | null = null;
-let tesseractLoadPromise: Promise<typeof import("tesseract.js")> | null = null;
+let tesseractPromise: Promise<typeof import("tesseract.js")> | null = null;
 
-/**
- * Lazy load Tesseract.js only when needed.
- * Prevents unnecessary bundle loading on app startup.
- */
-async function getTesseract(): Promise<typeof import("tesseract.js")> {
-  if (TesseractModule) {
-    return TesseractModule;
+function getTesseract(): Promise<typeof import("tesseract.js")> {
+  if (!tesseractPromise) {
+    tesseractPromise = import("tesseract.js").then((m) => m);
   }
-
-  if (tesseractLoadPromise) {
-    return tesseractLoadPromise;
-  }
-
-  tesseractLoadPromise = import("tesseract.js").then((mod) => {
-    TesseractModule = mod;
-    return mod;
-  });
-
-  return tesseractLoadPromise;
+  return tesseractPromise;
 }
 
-/**
- * Preload Tesseract.js in the background.
- * Call this when navigating to the screenshot analysis page.
- */
-export function preloadTesseract(): void {
-  if (!TesseractModule && !tesseractLoadPromise) {
-    tesseractLoadPromise = import("tesseract.js").then((mod) => {
-      TesseractModule = mod;
-      return mod;
-    });
-  }
+export async function preloadTesseract(): Promise<void> {
+  await getTesseract();
 }
 
-// ─── Tesseract OCR Provider Implementation ───
+let isCancelled = false;
 
-class TesseractOCRProvider implements OCRProvider {
-  readonly name = "Tesseract.js";
-
-  async extractText(
-    imageFile: File,
-    options: OCROptions = {}
-  ): Promise<{
-    text: string;
-    confidence: number;
-    processingTimeMs: number;
-  }> {
-    const { language = "eng", imageQuality = "medium", onProgress } = options;
-    const startTime = Date.now();
-
-    // Lazy load Tesseract
-    const Tesseract = await getTesseract();
-
-    // Preprocess image
-    const { dataUrl } = await preprocessImage(imageFile, imageQuality);
-
-    // Run OCR
-    const result = await Tesseract.recognize(dataUrl, language, {
-      logger: (m: { status: string; progress: number }) => {
-        if (m.status === "recognizing text" && onProgress) {
-          onProgress(Math.round(m.progress * 100));
-        }
-      },
-    });
-
-    const processingTimeMs = Date.now() - startTime;
-
-    // Clean the OCR text
-    const cleanedText = cleanOCRText(result.data.text);
-
-    return {
-      text: cleanedText,
-      confidence: result.data.confidence,
-      processingTimeMs,
-    };
-  }
-
-  cancel(): void {
-    // Tesseract.js worker termination happens automatically
-    // Future: implement AbortController for true cancellation
-  }
+export function cancelOCR(): void {
+  isCancelled = true;
 }
 
-// Singleton instance
-const tesseractProvider = new TesseractOCRProvider();
+// ─── Options ───
+
+export interface OCROptions {
+  language?: string;
+  imageQuality?: "low" | "medium" | "high";
+  onProgress?: (progress: number) => void;
+}
+
+export interface PreprocessOptions {
+  quality?: "low" | "medium" | "high";
+  upscale?: number;
+  contrast?: number;
+  adaptiveThreshold?: boolean;
+  grayscale?: boolean;
+  denoise?: boolean;
+  sharpen?: boolean;
+  jpegQuality?: number;
+}
 
 // ─── Image Preprocessing ───
 
@@ -112,14 +58,12 @@ interface PreprocessResult {
   height: number;
 }
 
-/**
- * Compress and preprocess image before OCR for better accuracy.
- * Applies contrast enhancement for dark mode screenshots.
- */
-async function preprocessImage(
-  imageFile: File,
-  quality: "low" | "medium" | "high" = "medium"
-): Promise<PreprocessResult> {
+async function preprocessImage(imageFile: File, options: PreprocessOptions = {}): Promise<PreprocessResult> {
+  const {
+    quality = "medium", upscale = 2, contrast = 1.3,
+    adaptiveThreshold = true, grayscale = true, denoise = true, sharpen = true, jpegQuality = 0.95,
+  } = options;
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(imageFile);
@@ -127,14 +71,15 @@ async function preprocessImage(
     img.onload = () => {
       URL.revokeObjectURL(url);
 
-      const maxDimensions: Record<string, number> = {
-        low: 800,
-        medium: 1200,
-        high: 1600,
-      };
-
+      const maxDimensions: Record<string, number> = { low: 800, medium: 1200, high: 2000 };
       const maxDim = maxDimensions[quality] || 1200;
       let { width, height } = img;
+
+      const isSmall = width < 600 || height < 400;
+      if (isSmall && upscale > 1) {
+        width = Math.round(width * upscale);
+        height = Math.round(height * upscale);
+      }
 
       if (width > maxDim || height > maxDim) {
         const ratio = Math.min(maxDim / width, maxDim / height);
@@ -145,185 +90,251 @@ async function preprocessImage(
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
       if (!ctx) {
-        // Fallback: use original file as data URL
         const reader = new FileReader();
-        reader.onload = () =>
-          resolve({
-            dataUrl: reader.result as string,
-            width: img.width,
-            height: img.height,
-          });
+        reader.onload = () => resolve({ dataUrl: reader.result as string, width: img.width, height: img.height });
         reader.onerror = reject;
         reader.readAsDataURL(imageFile);
         return;
       }
 
-      // White background for better OCR on dark screenshots
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Apply subtle contrast enhancement
-      const imageData = ctx.getImageData(0, 0, width, height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        // Increase contrast slightly
-        const factor = 1.1;
-        data[i] = Math.min(255, ((data[i] - 128) * factor + 128));
-        data[i + 1] = Math.min(255, ((data[i + 1] - 128) * factor + 128));
-        data[i + 2] = Math.min(255, ((data[i + 2] - 128) * factor + 128));
+      let imageData = ctx.getImageData(0, 0, width, height);
+      let data = imageData.data;
+
+      if (grayscale) {
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+          data[i] = gray; data[i + 1] = gray; data[i + 2] = gray;
+        }
       }
+
+      if (contrast > 1.0) {
+        const factor = contrast;
+        const intercept = 128 * (1 - factor);
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.min(255, Math.max(0, factor * data[i] + intercept));
+          data[i + 1] = Math.min(255, Math.max(0, factor * data[i + 1] + intercept));
+          data[i + 2] = Math.min(255, Math.max(0, factor * data[i + 2] + intercept));
+        }
+      }
+
+      if (adaptiveThreshold) applyAdaptiveThreshold(data, width, height);
+      if (denoise) applyDenoise(data, width, height);
+      if (sharpen) applySharpen(data, width, height);
+
       ctx.putImageData(imageData, 0, 0);
-
-      resolve({
-        dataUrl: canvas.toDataURL("image/jpeg", 0.92),
-        width,
-        height,
-      });
+      resolve({ dataUrl: canvas.toDataURL("image/jpeg", jpegQuality), width, height });
     };
 
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to load image"));
-    };
-
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Failed to load image")); };
     img.src = url;
   });
 }
 
-// ─── Text Extraction ───
-
-/**
- * Extract raw text from an image using Tesseract.js.
- * This is the low-level OCR function that just returns text.
- * Implements the OCRProvider interface.
- */
-export async function extractTextFromImage(
-  imageFile: File,
-  options: OCROptions = {}
-): Promise<{
-  text: string;
-  confidence: number;
-  processingTimeMs: number;
-}> {
-  return tesseractProvider.extractText(imageFile, options);
+function buildIntegralImage(gray: Uint8Array, width: number, height: number): Uint32Array {
+  const integral = new Uint32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x++) {
+      rowSum += gray[y * width + x];
+      integral[y * width + x] = rowSum + (y > 0 ? integral[(y - 1) * width + x] : 0);
+    }
+  }
+  return integral;
 }
 
-// ─── Main OCR Function ───
+function applyAdaptiveThreshold(data: Uint8ClampedArray, width: number, height: number): void {
+  const blockSize = 15, c = 10;
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) gray[i] = data[i * 4];
 
-/**
- * Run full OCR and trade extraction on an image.
- * Uses the intelligent parser layer for trade data extraction.
- *
- * Pipeline:
- *   Image → OCR Provider (Tesseract) → Raw Text + Confidence →
- *   Parser → Trade Extraction → Validation → Trade Review → Import
- */
-export async function runOCR(
-  imageFile: File,
-  options: OCROptions = {}
-): Promise<OCRResult> {
-  const startTime = Date.now();
+  const integralImage = buildIntegralImage(gray, width, height);
 
-  try {
-    // Step 1: Extract raw text using Tesseract (OCR Provider layer)
-    const { text, confidence: ocrConfidence } = await extractTextFromImage(
-      imageFile,
-      options
-    );
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const x1 = Math.max(0, x - blockSize), y1 = Math.max(0, y - blockSize);
+      const x2 = Math.min(width - 1, x + blockSize), y2 = Math.min(height - 1, y + blockSize);
+      const count = (x2 - x1 + 1) * (y2 - y1 + 1);
 
-    if (!text || text.trim().length === 0) {
-      return {
-        rawText: "",
-        trades: [],
-        detectedPrices: [],
-        detectedOrderTypes: [],
-        overallConfidence: 0,
-        confidenceLevel: "low",
-        processingTimeMs: Date.now() - startTime,
-        error: "No text detected in image",
-        qualityMetrics: {
-          ocrQuality: Math.round(ocrConfidence),
-          parserConfidence: 0,
-          tradeCompleteness: 0,
-          fieldsDetected: 0,
-          totalFields: 6,
-          detectedFields: [],
-        },
-      };
+      const a = y1 > 0 && x1 > 0 ? integralImage[(y1 - 1) * width + (x1 - 1)] : 0;
+      const b = y1 > 0 ? integralImage[(y1 - 1) * width + x2] : 0;
+      const c1 = x1 > 0 ? integralImage[y2 * width + (x1 - 1)] : 0;
+      const d = integralImage[y2 * width + x2];
+      const sum = d + a - b - c1;
+      const mean = sum / count;
+
+      const idx = (y * width + x) * 4;
+      const val = gray[y * width + x] > mean - c ? 255 : 0;
+      data[idx] = val; data[idx + 1] = val; data[idx + 2] = val;
     }
-
-    // Step 2: Parse the text using the intelligent parser (Parser layer)
-    const parseResult = parseOCRText(text, ocrConfidence);
-
-    return {
-      ...parseResult,
-      processingTimeMs: Date.now() - startTime,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown OCR error";
-    return {
-      rawText: "",
-      trades: [],
-      detectedPrices: [],
-      detectedOrderTypes: [],
-      overallConfidence: 0,
-      confidenceLevel: "low",
-      processingTimeMs: Date.now() - startTime,
-      error: message,
-      qualityMetrics: {
-        ocrQuality: 0,
-        parserConfidence: 0,
-        tradeCompleteness: 0,
-        fieldsDetected: 0,
-        totalFields: 6,
-        detectedFields: [],
-      },
-    };
   }
 }
 
-// ─── Utility Functions ───
+function applyDenoise(data: Uint8ClampedArray, width: number, height: number): void {
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const neighbors: number[] = [];
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          neighbors.push(copy[((y + dy) * width + (x + dx)) * 4]);
+        }
+      }
+      neighbors.sort((a, b) => a - b);
+      const idx = (y * width + x) * 4;
+      const blended = Math.round(0.7 * copy[idx] + 0.3 * neighbors[4]);
+      data[idx] = blended; data[idx + 1] = blended; data[idx + 2] = blended;
+    }
+  }
+}
 
-/**
- * Cancel ongoing OCR processing.
- * Note: Tesseract.js doesn't fully support cancellation,
- * so this is a best-effort implementation.
- */
-export function cancelOCR(): void {
-  tesseractProvider.cancel();
+function applySharpen(data: Uint8ClampedArray, width: number, height: number): void {
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (y * width + x) * 4;
+      const center = copy[idx];
+      const top = copy[((y - 1) * width + x) * 4];
+      const bottom = copy[((y + 1) * width + x) * 4];
+      const left = copy[(y * width + (x - 1)) * 4];
+      const right = copy[(y * width + (x + 1)) * 4];
+      const sharpened = 5 * center - top - bottom - left - right;
+      const clamped = Math.min(255, Math.max(0, sharpened));
+      const blended = Math.round(0.6 * center + 0.4 * clamped);
+      data[idx] = blended; data[idx + 1] = blended; data[idx + 2] = blended;
+    }
+  }
+}
+
+// ─── Tesseract OCR ───
+
+export async function extractTextFromImage(imageFile: File, options: OCROptions = {}): Promise<{ text: string; confidence: number; processingTimeMs: number }> {
+  const { language = "eng", imageQuality = "medium", onProgress } = options;
+  const startTime = Date.now();
+  const Tesseract = await getTesseract();
+
+  const preprocessOpts: PreprocessOptions = {
+    quality: imageQuality, upscale: 2, contrast: 1.3,
+    adaptiveThreshold: true, grayscale: true, denoise: true, sharpen: true, jpegQuality: 0.95,
+  };
+
+  const { dataUrl } = await preprocessImage(imageFile, preprocessOpts);
+
+  const result = await Tesseract.recognize(dataUrl, language, {
+    logger: (m: { status: string; progress: number }) => {
+      if (m.status === "recognizing text" && onProgress) onProgress(Math.round(m.progress * 100));
+    },
+  });
+
+  const processingTimeMs = Date.now() - startTime;
+  const cleanedText = cleanOCRText(result.data.text);
+
+  return { text: cleanedText, confidence: result.data.confidence, processingTimeMs };
 }
 
 /**
- * Get the OCR provider instance.
- * Use this for dependency injection and testing.
+ * Multi-pass OCR with different preprocessing configurations.
+ * Runs OCR 3 times with varied settings and returns the best result.
  */
-export function getOCRProvider(): OCRProvider {
-  return tesseractProvider;
-}
+export async function runMultiPassOCR(imageFile: File, options: OCROptions = {}): Promise<{ text: string; confidence: number; processingTimeMs: number }> {
+  const startTime = Date.now();
 
-/**
- * Get list of available OCR languages.
- */
-export function getOCRLanguages(): { code: string; name: string }[] {
-  return [
-    { code: "eng", name: "English" },
-    { code: "deu", name: "German" },
-    { code: "fra", name: "French" },
-    { code: "spa", name: "Spanish" },
-    { code: "ita", name: "Italian" },
-    { code: "por", name: "Portuguese" },
-    { code: "rus", name: "Russian" },
-    { code: "chi_sim", name: "Chinese (Simplified)" },
-    { code: "chi_tra", name: "Chinese (Traditional)" },
-    { code: "jpn", name: "Japanese" },
-    { code: "kor", name: "Korean" },
-    { code: "ara", name: "Arabic" },
-    { code: "tur", name: "Turkish" },
-    { code: "nld", name: "Dutch" },
-    { code: "pol", name: "Polish" },
+  const passes: PreprocessOptions[] = [
+    { quality: "high", upscale: 2, contrast: 1.3, adaptiveThreshold: true, grayscale: true, denoise: true, sharpen: true, jpegQuality: 0.95 },
+    { quality: "high", upscale: 2, contrast: 1.6, adaptiveThreshold: true, grayscale: true, denoise: false, sharpen: true, jpegQuality: 0.95 },
+    { quality: "high", upscale: 2, contrast: 1.2, adaptiveThreshold: false, grayscale: true, denoise: true, sharpen: false, jpegQuality: 0.98 },
   ];
+
+  const Tesseract = await getTesseract();
+  const results: Array<{ text: string; confidence: number; len: number }> = [];
+
+  for (let i = 0; i < passes.length; i++) {
+    try {
+      const { dataUrl } = await preprocessImage(imageFile, passes[i]);
+      const result = await Tesseract.recognize(dataUrl, options.language || "eng", {
+        logger: (m: { status: string; progress: number }) => {
+          if (m.status === "recognizing text" && options.onProgress) {
+            options.onProgress(Math.round(((i + m.progress) / passes.length) * 100));
+          }
+        },
+      });
+      const cleanedText = cleanOCRText(result.data.text);
+      results.push({ text: cleanedText, confidence: result.data.confidence, len: cleanedText.length });
+    } catch { /* continue to next pass */ }
+  }
+
+  if (results.length === 0) return { text: "", confidence: 0, processingTimeMs: Date.now() - startTime };
+
+  const best = results.reduce((best, current) => {
+    const bestScore = best.confidence * 0.6 + Math.min(best.len, 500) * 0.4;
+    const currentScore = current.confidence * 0.6 + Math.min(current.len, 500) * 0.4;
+    return currentScore > bestScore ? current : best;
+  });
+
+  const mergedText = mergeOCRResults(best, results);
+  return { text: mergedText, confidence: best.confidence, processingTimeMs: Date.now() - startTime };
+}
+
+function mergeOCRResults(best: { text: string; confidence: number; len: number }, allResults: Array<{ text: string; confidence: number; len: number }>): string {
+  if (allResults.length <= 1) return best.text;
+  const lines = new Set(best.text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0));
+  for (const result of allResults) {
+    if (result === best) continue;
+    const resultLines = result.text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+    for (const line of resultLines) {
+      if (!lines.has(line) && looksLikeTradeData(line)) lines.add(line);
+    }
+  }
+  return Array.from(lines).join("\n");
+}
+
+function looksLikeTradeData(line: string): boolean {
+  const tradeKeywords = /\b(buy|sell|long|short|entry|sl|tp|stop|loss|profit|lot|volume|price|@)\b/i;
+  return tradeKeywords.test(line) && /\d/.test(line);
+}
+
+function cleanOCRText(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ─── Main OCR Runner ───
+
+export async function runOCR(imageFile: File, options: OCROptions = {}): Promise<OCRResult> {
+  const startTime = Date.now();
+
+  try {
+    const { text, confidence: ocrConfidence } = await runMultiPassOCR(imageFile, options);
+
+    if (!text || text.trim().length === 0) {
+      return {
+        rawText: "", trades: [], detectedPrices: [], detectedOrderTypes: [],
+        overallConfidence: 0, confidenceLevel: "low",
+        processingTimeMs: Date.now() - startTime, error: "No text detected in image",
+        qualityMetrics: { ocrQuality: Math.round(ocrConfidence), parserConfidence: 0, tradeCompleteness: 0, fieldsDetected: 0, totalFields: 6, detectedFields: [] },
+      };
+    }
+
+    const parseResult = parseOCRText(text, ocrConfidence);
+    return { ...parseResult, processingTimeMs: Date.now() - startTime };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown OCR error";
+    return {
+      rawText: "", trades: [], detectedPrices: [], detectedOrderTypes: [],
+      overallConfidence: 0, confidenceLevel: "low",
+      processingTimeMs: Date.now() - startTime, error: message,
+      qualityMetrics: { ocrQuality: 0, parserConfidence: 0, tradeCompleteness: 0, fieldsDetected: 0, totalFields: 6, detectedFields: [] },
+    };
+  }
 }
