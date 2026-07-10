@@ -12,6 +12,7 @@
  */
 
 import type { OCRResult, OCRQualityMetrics } from "@/services/ocr/types";
+import type { VisionAnalysisResult } from "@/services/ai/vision/VisionAnalysisResult";
 
 // ─── Fusion Engine Configuration ───
 
@@ -102,6 +103,10 @@ export interface FusionMetadata {
   totalProcessingTimeMs: number;
   fusionEngineVersion: string;
   processedAt: string;
+  /** Vision provider that contributed (if any) */
+  visionProviderId?: string;
+  /** Whether the vision provider was a real AI provider */
+  visionProviderReal?: boolean;
 }
 
 // ─── Fusion Result ───
@@ -111,8 +116,10 @@ export interface FusionResult {
   candidates: FusedTradeCandidate[];
   /** Raw OCR result (always available) */
   ocrResult: OCRResult | null;
-  /** Vision analysis result (null if not used) */
+  /** Legacy vision analysis output (null if not used) */
   visionResult: VisionAnalysisOutput | null;
+  /** New vision analysis result from VisionProvider (null if not used) */
+  visionAnalysisResult: VisionAnalysisResult | null;
   /** Engine configuration used */
   config: FusionEngineConfig;
   /** Any warnings or messages */
