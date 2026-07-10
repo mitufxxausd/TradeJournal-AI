@@ -299,7 +299,6 @@ export {
   getAnalysis,
   deleteAnalysis,
   duplicateAnalysis,
-  reanalyze,
   getAllAnalyses,
   filterAnalyses,
   groupAnalysesByDate,
@@ -312,12 +311,6 @@ export {
 export { analyzeImageQuality } from "./imageQuality";
 
 export { generateTradeAdvice, ocrResultToExtractedTrade } from "./aiTradeAdvice";
-
-// ─── Prompts ───
-export { systemPrompts } from "./prompts";
-
-// ─── Factories ───
-export { createAIService, createAIServiceFromProvider } from "./factories";
 
 // ─── Utils ───
 export {
