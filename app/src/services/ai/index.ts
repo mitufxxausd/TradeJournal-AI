@@ -81,24 +81,101 @@ export {
   hasRealProviderConfigured,
 } from "./config";
 
-// ─── Vision ───
+// ─── Vision (New Architecture - Phase 7A) ───
+
+// Core vision types
 export type {
   VisionProvider,
-  VisionRequestOptions,
-  VisionAnalysisResult,
   VisionProviderConfig,
-  VisionProviderRegistry,
-} from "./vision";
+  VisionProviderCapabilities,
+} from "./vision/VisionProvider";
+
+export type {
+  VisionAnalysisResult,
+  VisionExtractedTradeData,
+  VisionChartAnalysis,
+  VisionFieldConfidence,
+  VisionRequestOptions,
+  VisionBatchResult,
+  VisionFeatureFlags,
+  VisionFeatureType,
+  VisionAnalysisType,
+  VisionProviderInfo,
+} from "./vision/VisionAnalysisResult";
+
+export { DEFAULT_VISION_FEATURE_FLAGS } from "./vision/VisionAnalysisResult";
+
+// Vision feature types
+export type {
+  DetectedChartPattern,
+  ChartPatternType,
+  PatternDirection,
+  PatternCompletion,
+  DetectedLevel,
+  LevelType,
+  LevelStrength,
+  TrendAnalysis,
+  TrendDirection,
+  TrendStrength,
+  DetectedCandlestickPattern,
+  CandlestickPatternType,
+  DetectedIndicator,
+  IndicatorType,
+  IndicatorSignal,
+  DetectedTradeAnnotation,
+  AnnotationType,
+  VolumeAnalysis,
+  TimeframeDetection,
+  PlatformDetection,
+  VisionFeatureConfidence,
+  DetectedRegion,
+} from "./vision/VisionFeatureTypes";
+
+// Vision registry
+export type { VisionProviderRegistry, RegisteredVisionProvider } from "./vision/VisionProviderRegistry";
 
 export {
+  DefaultVisionProviderRegistry,
+  getVisionProviderRegistry,
+  resetVisionProviderRegistry,
+  createVisionProviderRegistry,
+} from "./vision/VisionProviderRegistry";
+
+// Vision providers
+export {
+  MockVisionProvider,
+  getMockVisionProvider,
+  resetMockVisionProvider,
   OpenAIVisionProvider,
   GeminiVisionProvider,
   ClaudeVisionProvider,
   OpenRouterVisionProvider,
+  createStubVisionProvider,
+  createAllStubVisionProviders,
+  getStubVisionProviderTypes,
+} from "./vision/providers";
+
+export type { StubVisionProviderType } from "./vision/providers";
+
+// ─── Legacy Vision (Backward Compatibility) ───
+
+export type {
+  VisionProvider as LegacyVisionProvider,
+  VisionRequestOptions as LegacyVisionRequestOptions,
+  VisionAnalysisResult as LegacyVisionAnalysisResult,
+  VisionProviderConfig as LegacyVisionProviderConfig,
+  VisionProviderRegistry as LegacyVisionProviderRegistry,
+} from "./vision/types";
+
+export {
+  OpenAIVisionProvider as LegacyOpenAIVisionProvider,
+  GeminiVisionProvider as LegacyGeminiVisionProvider,
+  ClaudeVisionProvider as LegacyClaudeVisionProvider,
+  OpenRouterVisionProvider as LegacyOpenRouterVisionProvider,
   DefaultVisionRegistry,
   getVisionRegistry,
   resetVisionRegistry,
-} from "./vision";
+} from "./vision/types";
 
 // ─── Trade Fusion Engine ───
 export type {
@@ -118,11 +195,13 @@ export type {
 
 export {
   runFusion,
+  runFusionWithVisionProvider,
   getFusionConfig,
   updateFusionConfig,
   resetFusionConfig,
   getFusionProgress,
   getVisionProviderStatus,
+  initializeVisionRegistry,
   DEFAULT_FUSION_CONFIG,
 } from "./fusion";
 
