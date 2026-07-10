@@ -4,8 +4,7 @@
  */
 
 import type { SubscriptionTier, FeatureFlag } from "./types";
-import { FEATURE_TIER_MAP } from "./types";
-import { FEATURE_MATRIX } from "../ai/types";
+import { FEATURE_TIER_MAP, FEATURE_MATRIX } from "./types";
 
 const TIER_RANK: Record<SubscriptionTier, number> = { free: 0, pro: 1, elite: 2 };
 
