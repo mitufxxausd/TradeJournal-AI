@@ -21,6 +21,8 @@ import type {
   SubscriptionTier,
 } from "../types";
 
+import type { AIModelInfo } from "../types/common";
+
 const DELAY_MS = 1200;
 
 function delay(ms: number = DELAY_MS): Promise<void> {
@@ -309,7 +311,9 @@ function generateMockTranscription(): TranscriptionResult {
 
 export class MockAIProvider implements AIProvider {
   readonly name = "Mock AI (Demo)";
+  readonly version = "1.0.0";
   readonly requiredTier: SubscriptionTier = "pro";
+  readonly models: AIModelInfo[] = [];
 
   readonly capabilities: AIProviderCapabilities = {
     vision: true,
@@ -320,11 +324,18 @@ export class MockAIProvider implements AIProvider {
     transcription: true,
   };
 
+  isAvailable(): boolean {
+    return true;
+  }
+
+  getModels(): AIModelInfo[] {
+    return this.models;
+  }
+
   async analyzeScreenshot(request: VisionAnalyzeRequest): Promise<ScreenshotAnalysis | null> {
     await delay(800 + Math.random() * 800);
     console.log(`[MockAI] Analyzing screenshot: ${request.imageUrl.slice(0, 50)}...`);
 
-    // Cast to ScreenshotAnalysis since internal mock shape differs
     return {
       id: generateId(),
       screenshotId: generateId(),
