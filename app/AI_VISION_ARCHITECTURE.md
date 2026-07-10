@@ -2,48 +2,76 @@
 
 ## Overview
 
-Phase 6C introduces a production-ready AI Vision architecture for TradeJournal AI. The current free tier continues using OCR (Tesseract.js) for text extraction. The architecture is designed so that paid AI Vision providers can be plugged in later with minimal code changes.
+Phase 7A introduces a complete, production-ready AI Vision Provider architecture for TradeJournal AI. The current free tier continues using OCR (Tesseract.js) for text extraction. The architecture is designed so that paid AI Vision providers can be plugged in later with minimal code changes.
+
+**Key Principle:** OCR is ALWAYS the primary source in the free tier. Vision providers enhance but never replace OCR unless explicitly configured.
 
 ## Architecture Diagram
 
 ### Current Pipeline (Free Tier)
 ```
 Screenshot
-  ↓
+  |
+  v
 OCR Text Extraction (Tesseract.js)
-  ↓
+  |
+  v
 Parser (SymbolDetector + Price Extractor)
-  ↓
+  |
+  v
 Trade Fusion Engine
-  ↓
+  |
+  v
 Review (with sections)
-  ↓
+  |
+  v
 Import
 ```
 
 ### Future Pipeline (With Vision Provider)
 ```
 Screenshot
-  ↓
-┌─────────────────┬──────────────────┐
-↓                 ↓                  ↓
-OCR Text      AI Vision Analysis   (parallel)
-Extraction    (OpenAI/Gemini/Claude)
-  ↓                 ↓
+  |
+  v
+  |-------------------|-------------------|
+  v                   v                   v
+OCR Text        VisionProvider      (parallel)
+Extraction      Analysis
+  |                   |
+  v                   v
 Parser            Chart Understanding
-  ↓                 ↓
-└──────┬──────────┘
-       ↓
-Trade Fusion Engine (combines OCR + Vision)
-  ↓
-Review (with sections + Vision insights)
-  ↓
-Import
+  |                   |
+  |---------|---------|
+            |
+            v
+  Trade Fusion Engine (combines OCR + Vision)
+            |
+            v
+  Review (with sections + Vision insights)
+            |
+            v
+         Import
+```
+
+## File Structure (Phase 7A)
+
+```
+src/services/ai/vision/
+├── index.ts                          # Centralized exports
+├── VisionProvider.ts                 # Core VisionProvider interface
+├── VisionProviderRegistry.ts         # Provider registry with priority
+├── VisionAnalysisResult.ts           # Comprehensive result types
+├── VisionFeatureTypes.ts             # Detailed feature detection types
+├── types.ts                          # Legacy types (backward compat)
+└── providers/
+    ├── index.ts                      # Provider exports
+    ├── MockVisionProvider.ts         # Development/testing provider
+    └── StubVisionProviders.ts        # OpenAI, Gemini, Claude, OpenRouter stubs
 ```
 
 ## Module Responsibilities
 
-### 1. OCR (Optical Character Recognition)
+### 1. OCR (Optical Character Recognition) - UNCHANGED
 **Location:** `src/services/ocr/`
 
 **Responsibilities:**
@@ -58,32 +86,16 @@ Import
 - `symbolDetector.ts` - Advanced symbol detection with alias support
 - `types.ts` - Shared OCR type definitions
 
-**Explicitly Ignores:**
-- Price scale numbers
-- Axis labels
-- Indicator values (RSI, MACD, EMA, etc.)
-- TradingView/MT4/MT5 toolbar text
-- Windows title bar text
-- Zoom values, crosshair coordinates
-- Timestamps, watermarks, news widgets, ads
-
-### 2. SymbolDetector
+### 2. SymbolDetector - UNCHANGED
 **Location:** `src/services/ocr/symbolDetector.ts`
 
 **Responsibilities:**
 - Search across multiple text sources (window title, chart title, broker title, watchlist, OCR blocks)
-- Recognize standard aliases (XAUUSD ↔ GOLD, BTCUSD ↔ BTCUSDT, etc.)
+- Recognize standard aliases (XAUUSD <-> GOLD, BTCUSD <-> BTCUSDT, etc.)
 - Return normalized standard symbols
 - Return empty string with note if confidence is low (never "Undetected")
 
-**Supported Aliases:**
-- Gold: GOLD, XAU/USD, XAU-USD, SPOT GOLD → XAUUSD
-- Bitcoin: BTC, BTC/USD, BTCUSDT, BITCOIN → BTCUSD
-- Ethereum: ETH, ETH/USD, ETHUSDT → ETHUSD
-- Indices: NAS100, NASDAQ, US30, DOW, SPX500, S&P500 → standardized
-- Oil: USOIL, WTI, BRENT, CRUDE → standardized
-
-### 3. Parser
+### 3. Parser - UNCHANGED
 **Location:** `src/services/ocr/parser.ts`
 
 **Responsibilities:**
@@ -95,14 +107,7 @@ Import
 - Calculate confidence scores per field
 - Calculate quality metrics (OCR Quality, Parser Confidence, Trade Completeness)
 
-**Price Classification Rules:**
-- TP ONLY from explicit labels ("TP:", "Take Profit:", "Target:")
-- SL ONLY from explicit labels ("SL:", "Stop Loss:")
-- Entry from explicit labels or @symbol patterns
-- Chart scale numbers are ALWAYS discarded
-- Isolated prices in sequences (price ladder) are discarded
-
-### 4. TradeFusionEngine
+### 4. TradeFusionEngine - ENHANCED
 **Location:** `src/services/ai/fusion/`
 
 **Responsibilities:**
@@ -111,12 +116,14 @@ Import
 - Flag fields that need user review
 - Calculate overall confidence and completeness scores
 - Provide vision provider status information
+- **NEW:** Support for new VisionProvider architecture via `runFusionWithVisionProvider()`
+- **NEW:** Automatic fallback to OCR when vision is unavailable
+- **NEW:** Vision result conversion for backward compatibility
 
-**Key Features:**
-- Each field has independent confidence and source tracking
-- Vision results override OCR only when configured and higher confidence
-- Fields with low confidence are flagged for review
-- Never invents data - null if not detected
+**Key Files:**
+- `TradeFusionEngine.ts` - Engine implementation
+- `types.ts` - Fusion types (enhanced with VisionAnalysisResult support)
+- `index.ts` - Exports (includes new functions)
 
 **Configuration:**
 ```typescript
@@ -129,72 +136,144 @@ interface FusionEngineConfig {
 }
 ```
 
-### 5. Vision Provider Architecture
-**Location:** `src/services/ai/vision/`
+**NEW Functions:**
+- `runFusionWithVisionProvider()` - Enhanced fusion with VisionProvider integration
+- `initializeVisionRegistry()` - Initialize the vision provider registry
+- `convertVisionResultToLegacy()` - Convert new results to legacy format
+- `enhanceWithVisionData()` - Enhance candidates with VisionExtractedTradeData
 
-**Interface:**
+### 5. Vision Provider Architecture - NEW (Phase 7A)
+
+#### 5.1 VisionProvider Interface
+**Location:** `src/services/ai/vision/VisionProvider.ts`
+
 ```typescript
 interface VisionProvider {
   readonly name: string;
   readonly providerId: string;
+  readonly version: string;
+  readonly supportedFeatures: VisionFeatureFlags;
   isAvailable(): boolean;
-  analyzeChart(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult>;
-  extractTradeData(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult>;
+  analyze(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult>;
+  analyzeBatch(imageFiles: File[], options?: VisionRequestOptions): Promise<VisionBatchResult>;
+  healthCheck?(): Promise<{ healthy: boolean; latencyMs: number; message: string }>;
 }
 ```
 
-**Stub Providers (ready for implementation):**
-- `OpenAIVisionProvider` - OpenAI GPT-4V
+#### 5.2 Vision Analysis Result
+**Location:** `src/services/ai/vision/VisionAnalysisResult.ts`
+
+Comprehensive result types including:
+- `VisionAnalysisResult` - Complete analysis result
+- `VisionChartAnalysis` - Chart pattern detection results
+- `VisionExtractedTradeData` - Trade data extraction results
+- `VisionFeatureFlags` - Feature enablement flags
+- `VisionBatchResult` - Batch processing results
+
+#### 5.3 Vision Feature Types
+**Location:** `src/services/ai/vision/VisionFeatureTypes.ts`
+
+Detailed feature detection types:
+- `DetectedChartPattern` - Chart patterns (triangles, H&S, flags, etc.)
+- `DetectedLevel` - Support/resistance levels
+- `TrendAnalysis` - Trend direction and strength
+- `DetectedCandlestickPattern` - Candlestick patterns
+- `DetectedIndicator` - Technical indicators
+- `DetectedTradeAnnotation` - Trade annotations on chart
+- `VolumeAnalysis` - Volume profile
+- `TimeframeDetection` - Timeframe identification
+- `PlatformDetection` - Broker/platform identification
+
+#### 5.4 Provider Registry
+**Location:** `src/services/ai/vision/VisionProviderRegistry.ts`
+
+Priority-based provider management:
+```typescript
+interface VisionProviderRegistry {
+  register(provider: VisionProvider, priority?: number): void;
+  unregister(providerId: string): boolean;
+  getPrimaryProvider(): VisionProvider | null;
+  getProvider(providerId: string): VisionProvider | null;
+  getAllProviders(): RegisteredVisionProvider[];
+  getAvailableProviders(): VisionProvider[];
+  getProvidersByFeature(feature: VisionFeatureType): VisionProvider[];
+  hasAvailableProvider(): boolean;
+  // ... and more
+}
+```
+
+**Usage:**
+```typescript
+const registry = getVisionProviderRegistry();
+registry.register(new MockVisionProvider(), 0);  // Highest priority
+registry.register(new OpenAIVisionProvider(), 10);
+
+const primary = registry.getPrimaryProvider();
+if (primary) {
+  const result = await primary.analyze(imageFile);
+}
+```
+
+#### 5.5 Mock Vision Provider
+**Location:** `src/services/ai/vision/providers/MockVisionProvider.ts`
+
+- Always available (no API key needed)
+- Returns realistic mock data for all vision features
+- Supports all feature types
+- Simulates processing delays
+- Used for development and testing
+
+#### 5.6 Stub Providers
+**Location:** `src/services/ai/vision/providers/StubVisionProviders.ts`
+
+Stub implementations for:
+- `OpenAIVisionProvider` - OpenAI GPT-4V/GPT-4o
 - `GeminiVisionProvider` - Google Gemini
 - `ClaudeVisionProvider` - Anthropic Claude
 - `OpenRouterVisionProvider` - OpenRouter unified API
 
-All stubs return `isAvailable() === false` and throw when called, ensuring no accidental API usage.
-
-**Provider Registry:**
-```typescript
-const registry = getVisionRegistry();
-registry.register(new OpenAIVisionProvider());
-// Providers checked in priority order
-const primary = registry.getPrimaryProvider();
-```
-
-### 6. Review UI
-**Location:** `src/pages/ai/ai-screenshot-analysis.tsx`
-
-**Features:**
-- AI Vision Status panel (toggleable)
-- Section-based review cards:
-  - Detected Successfully (green)
-  - Missing Information (amber)
-  - Needs Review (amber banner)
-  - Warnings (red banner)
-- Editable fields for every trade property
-- Quality metrics display (OCR Quality, Parser Confidence, Completeness)
-- Mobile-responsive design
-- Fullscreen image preview
-- Raw OCR text viewer (collapsible)
+All stubs:
+- Return `isAvailable() === false`
+- Throw descriptive errors when called
+- Ready for real implementation
 
 ## How to Add a Vision Provider
 
 ### Step 1: Implement the VisionProvider interface
 ```typescript
 // src/services/ai/vision/providers/MyProvider.ts
-import type { VisionProvider, VisionRequestOptions, VisionAnalysisResult } from "../types";
+import type { VisionProvider, VisionProviderConfig } from "../VisionProvider";
+import type { VisionAnalysisResult, VisionRequestOptions } from "../VisionAnalysisResult";
+import { DEFAULT_VISION_FEATURE_FLAGS } from "../VisionAnalysisResult";
 
 export class MyVisionProvider implements VisionProvider {
   readonly name = "My Provider";
   readonly providerId = "myprovider";
+  readonly version = "1.0.0";
+  readonly supportedFeatures = { ...DEFAULT_VISION_FEATURE_FLAGS };
 
-  isAvailable(): boolean {
-    return !!import.meta.env.VITE_MY_PROVIDER_API_KEY;
+  private config: VisionProviderConfig;
+
+  constructor(config?: Partial<VisionProviderConfig>) {
+    this.config = {
+      providerId: this.providerId,
+      name: this.name,
+      enabled: true,
+      priority: 10,
+      timeoutMs: 30000,
+      ...config,
+    };
   }
 
-  async analyzeChart(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult> {
+  isAvailable(): boolean {
+    return !!this.config.apiKey;
+  }
+
+  async analyze(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult> {
     // Implementation here
   }
 
-  async extractTradeData(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult> {
+  async analyzeBatch(imageFiles: File[], options?: VisionRequestOptions): Promise<VisionBatchResult> {
     // Implementation here
   }
 }
@@ -202,40 +281,22 @@ export class MyVisionProvider implements VisionProvider {
 
 ### Step 2: Register the provider
 ```typescript
-// In src/services/ai/vision/types.ts
-// Add to getVisionRegistry():
-export function getVisionRegistry(): VisionProviderRegistry {
-  if (!globalRegistry) {
-    globalRegistry = new DefaultVisionRegistry();
-    globalRegistry.register(new OpenAIVisionProvider());
-    globalRegistry.register(new GeminiVisionProvider());
-    globalRegistry.register(new ClaudeVisionProvider());
-    globalRegistry.register(new OpenRouterVisionProvider());
-    globalRegistry.register(new MyVisionProvider()); // <-- Add here
-  }
-  return globalRegistry;
-}
+// In your app initialization:
+import { getVisionProviderRegistry } from "@/services/ai/vision";
+import { MyVisionProvider } from "@/services/ai/vision/providers/MyProvider";
+
+const registry = getVisionProviderRegistry();
+registry.register(new MyVisionProvider({
+  apiKey: import.meta.env.VITE_MY_PROVIDER_API_KEY,
+  enabled: true,
+  priority: 1,
+}), 1);
 ```
 
-### Step 3: Add configuration
+### Step 3: Enable Vision in the Fusion Engine
 ```typescript
-// In src/services/ai/config.ts
-// Add to getDefaultProviderConfigs():
-{
-  name: "myprovider",
-  apiKey: readEnv("VITE_MY_PROVIDER_API_KEY", ""),
-  baseUrl: readEnv("VITE_MY_PROVIDER_BASE_URL", "https://api.myprovider.com"),
-  model: readEnv("VITE_MY_PROVIDER_MODEL", "default"),
-  enabled: readEnvBoolean("VITE_MY_PROVIDER_ENABLED", false),
-  capabilities: ["vision", "ocr"],
-  priority: readEnvNumber("VITE_MY_PROVIDER_PRIORITY", 5),
-  timeoutMs: readEnvNumber("VITE_MY_PROVIDER_TIMEOUT", 30000),
-}
-```
+import { updateFusionConfig } from "@/services/ai/fusion";
 
-### Step 4: Enable Vision in the Fusion Engine
-```typescript
-// When a real provider is configured:
 updateFusionConfig({
   enableVision: true,
   primarySource: "auto",
@@ -256,7 +317,7 @@ All confidence metrics are measurable and derived from concrete values:
 - Considers explicit labels vs inferred values
 
 ### Trade Completeness (0-100)
-- Detected required fields ÷ total required fields
+- Detected required fields / total required fields
 - Required fields: symbol, direction, entryPrice, stopLoss, takeProfit, positionSize
 
 ### Field-Level Confidence
@@ -266,47 +327,68 @@ Each field has its own confidence score:
 - Context inference: 0.5-0.7
 - Not detected: 0
 
-## Mobile Improvements
+## Exports
 
-Phase 6C includes comprehensive mobile UX improvements:
-- Responsive grid layouts (stack on mobile, side-by-side on desktop)
-- Touch-friendly button sizes (min 44px tap targets)
-- Improved spacing and padding for small screens
-- Scrollable raw OCR text with word wrapping
-- Proper landscape screenshot handling
-- Fullscreen modal with proper z-indexing
-- Font size scaling for readability
-- Flex-wrap for badges and action buttons
+### From `src/services/ai/vision`
 
-## File Structure
+**Interfaces:**
+- `VisionProvider` - Main provider interface
+- `VisionProviderConfig` - Provider configuration
+- `VisionProviderCapabilities` - Provider capabilities
+- `VisionProviderRegistry` - Registry interface
+- `RegisteredVisionProvider` - Registry entry type
 
-```
-src/
-├── services/
-│   ├── ocr/
-│   │   ├── index.ts              # OCR exports
-│   │   ├── types.ts              # OCR types & interfaces
-│   │   ├── tesseractOCR.ts       # Tesseract provider
-│   │   ├── parser.ts             # Trade parser
-│   │   └── symbolDetector.ts     # Symbol detection
-│   ├── ai/
-│   │   ├── index.ts              # AI module exports
-│   │   ├── fusion/               # Trade Fusion Engine
-│   │   │   ├── index.ts
-│   │   │   ├── types.ts
-│   │   │   └── TradeFusionEngine.ts
-│   │   ├── vision/               # Vision provider architecture
-│   │   │   ├── index.ts
-│   │   │   └── types.ts
-│   │   └── config.ts             # Provider configuration
-│   └── ...
-├── hooks/
-│   └── use-ocr.ts                # OCR hook with fusion integration
-├── pages/
-│   └── ai/
-│       └── ai-screenshot-analysis.tsx  # Main analysis page
-└── ...
-```
+**Result Types:**
+- `VisionAnalysisResult` - Complete analysis result
+- `VisionExtractedTradeData` - Extracted trade data
+- `VisionChartAnalysis` - Chart analysis result
+- `VisionFieldConfidence` - Field confidence scores
+- `VisionRequestOptions` - Analysis request options
+- `VisionBatchResult` - Batch result
+- `VisionProviderInfo` - Provider information
+
+**Feature Types:**
+- `DetectedChartPattern`, `ChartPatternType`
+- `DetectedLevel`, `LevelType`, `LevelStrength`
+- `TrendAnalysis`, `TrendDirection`, `TrendStrength`
+- `DetectedCandlestickPattern`, `CandlestickPatternType`
+- `DetectedIndicator`, `IndicatorType`, `IndicatorSignal`
+- `DetectedTradeAnnotation`, `AnnotationType`
+- `VolumeAnalysis`, `TimeframeDetection`, `PlatformDetection`
+- `VisionFeatureConfidence`, `DetectedRegion`
+
+**Providers:**
+- `MockVisionProvider`, `getMockVisionProvider`, `resetMockVisionProvider`
+- `OpenAIVisionProvider`, `GeminiVisionProvider`, `ClaudeVisionProvider`, `OpenRouterVisionProvider`
+- `createStubVisionProvider`, `createAllStubVisionProviders`
+
+**Registry Functions:**
+- `getVisionProviderRegistry` - Get singleton registry
+- `resetVisionProviderRegistry` - Reset registry
+- `createVisionProviderRegistry` - Create fresh registry
+
+**Constants:**
+- `DEFAULT_VISION_FEATURE_FLAGS` - Default feature flags
+
+### From `src/services/ai/fusion`
+
+**NEW Functions:**
+- `runFusionWithVisionProvider()` - Enhanced fusion with vision
+- `initializeVisionRegistry()` - Initialize default registry
+
+**Existing Functions (preserved):**
+- `runFusion()` - Original fusion (backward compatible)
+- `getFusionConfig()`, `updateFusionConfig()`, `resetFusionConfig()`
+- `getFusionProgress()`, `getVisionProviderStatus()`
+
+## Backward Compatibility
+
+All existing code continues to work without changes:
+- `runFusion()` function signature unchanged
+- Legacy vision types still exported from `src/services/ai/vision/types.ts`
+- Old `VisionProvider` interface from `types.ts` still available
+- OCR pipeline completely untouched
+- All existing hooks, components, and pages work as before
 
 ## Testing
 
@@ -314,14 +396,24 @@ Run the following to verify the implementation:
 ```bash
 cd app
 npm install
-npm run dev      # Start dev server
 npm run build    # Verify TypeScript and build
 ```
 
 Ensure:
-- Screenshot Analysis page loads correctly
-- OCR extraction works with test screenshots
-- Trade review cards display sections properly
-- Mobile layout is responsive
 - No TypeScript errors
 - No build errors
+- All existing tests pass
+- Screenshot Analysis page loads correctly
+- OCR extraction still works
+
+## Phase History
+
+- **Phase 6C:** Initial vision architecture with basic types and stubs
+- **Phase 7A:** Complete vision provider architecture (current)
+  - New VisionProvider interface with feature flags
+  - Comprehensive feature detection types
+  - Provider registry with priority-based selection
+  - Mock provider with realistic data
+  - Stub providers for OpenAI, Gemini, Claude, OpenRouter
+  - Enhanced TradeFusionEngine with vision integration
+  - Full backward compatibility with existing OCR pipeline
