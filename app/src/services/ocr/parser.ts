@@ -118,8 +118,8 @@ interface PriceContext {
 
 function analyzePriceContext(line: string, index: number, allPrices: DetectedPrice[]): PriceContext {
   // Check for explicit labels
-  const tpLabels = /\b(tp|take\s*profit|target|profit\s*target|t\.p|t/p)\b[\s:;=]*/i;
-  const slLabels = /\b(sl|stop\s*loss|stop|s\.l|s/l)\b[\s:;=]*/i;
+  const tpLabels = /\b(tp|take\s*profit|target|profit\s*target|t\.p|t\/p)\b[\s:;=]*/i;
+  const slLabels = /\b(sl|stop\s*loss|stop|s\.l|s\/l)\b[\s:;=]*/i;
   const entryLabels = /\b(entry|open|opening|price\s*@|@price|entry\s*price|open\s*price|order\s*price)\b[\s:;=]*/i;
   const lotLabels = /\b(lot|lots|volume|qty|quantity|size|pos\s*size|position\s*size)\b[\s:;=]*/i;
 
