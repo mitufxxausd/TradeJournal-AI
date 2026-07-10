@@ -9,14 +9,26 @@
  * - Stub providers (OpenAI, Gemini, Claude, OpenRouter - ready for implementation)
  * - Comprehensive feature types for chart analysis
  * - Analysis result types
+ * - Intelligent Vision Pipeline (Phase 7B)
+ * - Region Detection (Phase 7B)
+ * - Symbol Detection with priority (Phase 7B)
+ * - Trade Field Extraction with confidence (Phase 7B)
+ * - Provider Selector with "Coming Soon" states (Phase 7B)
+ * - Lazy Loader for performance (Phase 7B)
  *
  * Architecture:
- *   Screenshot → VisionProvider.analyze() → VisionAnalysisResult
+ *   Screenshot → IntelligentVisionPipeline → PipelineOutput
  *                           ↑
  *              OCR Fallback (always available via TradeFusionEngine)
  *
  * Usage:
- *   import { getVisionProviderRegistry, MockVisionProvider } from "@/services/ai/vision";
+ *   import { analyzeScreenshot, getVisionProviderRegistry } from "@/services/ai/vision";
+ *
+ *   // Simple usage
+ *   const result = await analyzeScreenshot(imageFile);
+ *   console.log(result.extractedTrade.symbol.value);
+ *
+ *   // Advanced usage with provider registry
  *   const registry = getVisionProviderRegistry();
  *   registry.register(new MockVisionProvider());
  *   const provider = registry.getPrimaryProvider();
@@ -104,7 +116,6 @@ export type { StubVisionProviderType } from "./providers";
 
 // ─── Legacy Compatibility (from original types.ts) ───
 
-// Re-export the legacy VisionProvider interface from types.ts for backward compatibility
 export type {
   VisionProvider as LegacyVisionProvider,
   VisionRequestOptions as LegacyVisionRequestOptions,
@@ -122,3 +133,145 @@ export {
   getVisionRegistry as legacyGetVisionRegistry,
   resetVisionRegistry as legacyResetVisionRegistry,
 } from "./types";
+
+// ─── Intelligent Vision Pipeline (Phase 7B) ───
+
+export type {
+  PipelineInput,
+  PipelineOutput,
+  PipelineContext,
+  PipelineStage,
+  PipelineStageName,
+  PipelineStageResult,
+  PipelineMetadata,
+  PipelineError,
+  StagePerformance,
+  ExtractedTradeFields,
+  FieldExtraction,
+  FieldExtractionStatus,
+  FieldSource,
+  DetectedSymbolResult,
+  DetectedImageRegion,
+  ImageRegionType,
+  PipelineConfidenceScores,
+  IntelligentVisionPipeline,
+} from "./pipeline";
+
+export {
+  createPipelineContext,
+  createEmptyPipelineOutput,
+} from "./pipeline";
+
+export {
+  DefaultIntelligentVisionPipeline,
+  getIntelligentVisionPipeline,
+  resetIntelligentVisionPipeline,
+  analyzeScreenshot,
+} from "./IntelligentVisionPipeline";
+
+// ─── Region Detection (Phase 7B) ───
+
+export type { RegionDetectionResult } from "./regionDetection";
+
+export {
+  detectRegions,
+  getRegionsBySymbolPriority,
+  getTradeRelevantText,
+  getRegionsByType,
+  getTextFromRegionType,
+  runRegionDetectionStage,
+} from "./regionDetection";
+
+// ─── Symbol Detection (Phase 7B) ───
+
+export {
+  detectSymbolWithRegions,
+  detectSymbolFromSourcesWithRegions,
+  isValidSymbol,
+  getSymbolSourceDisplay,
+  getSymbolSourcePriorityList,
+} from "./symbolDetection";
+
+// ─── Trade Field Extraction (Phase 7B) ───
+
+export type {
+  TradeFieldExtractionInput,
+  TradeFieldExtractionResult,
+} from "./tradeFieldExtraction";
+
+export {
+  extractTradeFields,
+  runTradeFieldExtractionStage,
+  getFieldsNeedingReview,
+  areCriticalFieldsDetected,
+  extractedFieldsToOCRTrade,
+} from "./tradeFieldExtraction";
+
+// ─── OCR Processing (Phase 7B) ───
+
+export type { OCRTextStats } from "./ocrProcessing";
+
+export {
+  normalizeOCRText,
+  filterTradeRelevantText,
+  processOCRResult,
+  getOCRTextStats,
+} from "./ocrProcessing";
+
+// ─── Provider Selector (Phase 7B) ───
+
+export type {
+  ProviderOption,
+  ProviderAvailabilityStatus,
+  ProviderSelectorState,
+  ProviderSelectionConfig,
+  ProviderComparison,
+} from "./providerSelector";
+
+export {
+  PROVIDER_OPTIONS,
+  getAllProviderOptions,
+  getAvailableProviders,
+  getComingSoonProviders,
+  getProviderOption,
+  isProviderAvailable,
+  getProviderStatusDisplay,
+  getProviderStatusColor,
+  getProviderSelectionConfig,
+  setProviderSelectionConfig,
+  resetProviderSelectionConfig,
+  getRecommendedProvider,
+  compareProviders,
+} from "./providerSelector";
+
+// ─── Lazy Loader (Phase 7B) ───
+
+export {
+  loadOCRModule,
+  loadParserModule,
+  loadTesseractModule,
+  loadSymbolDetectorModule,
+  loadMockVisionProvider,
+  loadFusionEngine,
+  loadRegionDetection,
+  loadTradeFieldExtraction,
+  loadOCRProcessing,
+  loadSymbolDetection,
+  preloadOCR,
+  preloadParser,
+  preloadVisionModules,
+  clearLazyCache,
+  getLazyCacheStats,
+} from "./lazyLoader";
+
+export type {
+  LazyLoadedOCR,
+  LazyLoadedParser,
+  LazyLoadedTesseract,
+  LazyLoadedMockProvider,
+  LazyLoadedFusion,
+  LazyLoadedRegionDetection,
+  LazyLoadedTradeFieldExtraction,
+  LazyLoadedOCRProcessing,
+  LazyLoadedSymbolDetection,
+} from "./lazyLoader";
