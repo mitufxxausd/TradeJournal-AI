@@ -5,7 +5,6 @@
  */
 
 import type {
-  AIAnalysisResult,
   ScreenshotAnalysis,
   TradeSummary,
   AICoaching,
@@ -18,6 +17,20 @@ import type {
 } from "./types";
 import type { AIProvider } from "./providers/types";
 import { getMockAIProvider } from "./providers/mockProvider";
+
+// ─── Local Types ───
+
+export interface AIAnalysisResult {
+  screenshots: ScreenshotAnalysis[];
+  tradeSummary: TradeSummary | null;
+  coaching: AICoaching | null;
+  overallScore: number;
+  hasAIData: boolean;
+  provider: string;
+  generatedAt: string;
+  processingStatus: string;
+  error?: string;
+}
 
 // ─── Provider Registry ───
 
@@ -133,13 +146,19 @@ export async function generateTradeAIAnalysis(
       result.coaching = coachingData;
     }
 
-    // Calculate overall score
+    // Calculate overall score from available confidence values
     const scores: number[] = [];
-    if (result.tradeSummary) {
-      scores.push(result.tradeSummary.tradeQualityScore);
+    if (result.tradeSummary?.confidence) {
+      scores.push(result.tradeSummary.confidence);
     }
-    if (result.coaching) {
-      scores.push(result.coaching.disciplineScore, result.coaching.riskScore);
+    if (result.coaching?.confidence) {
+      scores.push(result.coaching.confidence);
+    }
+    if (result.screenshots.length > 0) {
+      const avgScreenshotConfidence = result.screenshots.reduce(
+        (sum, s) => sum + s.confidence, 0
+      ) / result.screenshots.length;
+      scores.push(avgScreenshotConfidence);
     }
     if (scores.length > 0) {
       result.overallScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
