@@ -1,419 +1,270 @@
-# AI Vision Architecture Documentation
+# AI Vision Architecture
 
 ## Overview
 
-Phase 7A introduces a complete, production-ready AI Vision Provider architecture for TradeJournal AI. The current free tier continues using OCR (Tesseract.js) for text extraction. The architecture is designed so that paid AI Vision providers can be plugged in later with minimal code changes.
+This document describes the AI Vision architecture for the TradeJournal-AI application.
 
-**Key Principle:** OCR is ALWAYS the primary source in the free tier. Vision providers enhance but never replace OCR unless explicitly configured.
+## Providers
 
-## Architecture Diagram
+### OCR (Current)
+- Tesseract.js for text extraction
+- Multi-pass OCR with enhanced preprocessing (Phase 7C)
 
-### Current Pipeline (Free Tier)
+### AI Vision (Future)
+- OpenAI Vision
+- Google Gemini Vision
+- Claude Vision
+- OpenRouter Vision
+
+## Components
+
+### ScreenshotAnalysis
+Main page for uploading and analyzing screenshots.
+
+### OCR Pipeline
+```
+Image → Enhanced Preprocessing → Multi-Pass OCR → Text Merge → Parser → Trade Extraction → Validation
+```
+
+## Phase 7C: AI Trade Extraction, Workspace History & Smart Journal Integration
+
+Phase 7C transforms the Screenshot Analysis feature into a production-ready AI Trade Extraction workflow. The AI does NOT analyze chart patterns - it focuses on extracting trading information accurately and providing advice based on extracted data and journal history.
+
+### New Features
+
+#### 1. Persistent AI Workspace History
+- Every screenshot analysis is stored permanently in localStorage
+- Survives page refreshes and browser restarts
+- Stores: screenshot, OCR text, extracted trade, confidence scores, AI advice, review status, import status, journal trade ID, timestamp
+- Automatic reload on page open
+- Maximum 100 analyses (LRU eviction)
+
+**Files:**
+- `src/services/ai/historyStorage.ts` - CRUD operations, filtering, grouping, statistics
+- `src/services/ai/types/screenshot-analysis.ts` - History types
+
+#### 2. AI Screenshot History UI
+- History panel with date grouping (Today, Yesterday, This Week, This Month, Older)
+- Status indicators: Imported, Needs Review, Rejected
+- Click to reopen full analysis
+- Actions: Open, Duplicate, Delete, Re-analyze
+
+**Files:**
+- `src/hooks/ai/useScreenshotHistory.ts` - React hook for history management
+- `src/pages/ai/ai-screenshot-analysis.tsx` - History panel integration
+
+#### 3. Smart Screenshot Quality Analysis
+Pre-OCR analysis that predicts OCR accuracy:
+- **Resolution** - Width x height assessment
+- **Blur** - Laplacian variance edge detection
+- **Compression** - 8x8 JPEG block artifact detection
+- **Brightness** - Optimal range detection
+- **Contrast** - Standard deviation analysis
+- **Text Visibility** - Edge density measurement
+- **Expected OCR Accuracy** - Weighted prediction (0-100)
+- **Explanation** - Human-readable quality explanation
+- **Recommendations** - Actionable improvement tips
+
+**Files:**
+- `src/services/ai/imageQuality.ts` - Quality analysis algorithms
+
+#### 4. Enhanced AI Trade Extraction
+Per-field extraction with independent confidence scores:
+- Symbol, Direction, Entry Price, Stop Loss, Take Profit, Lot Size
+- Risk %, Timeframe, Broker, Date, Time, Order Type
+- Never guesses missing values
+- Color-coded review UI (Green=detected, Yellow=needs review, Red=missing)
+
+**Files:**
+- `src/services/ai/aiTradeAdvice.ts` - `ocrResultToExtractedTrade()` function
+
+#### 5. OCR Improvements (Multi-Pass)
+Enhanced preprocessing pipeline:
+- Image upscaling (2x for small images)
+- Grayscale conversion
+- Contrast enhancement (factor 1.3)
+- Adaptive thresholding (15px blocks)
+- Noise reduction (median filter)
+- Sharpening (unsharp mask)
+- Multi-pass OCR (3 different configs, best result selected)
+- Text merging across passes
+
+**Files:**
+- `src/services/ocr/tesseractOCR.ts` - Enhanced preprocessing, `runMultiPassOCR()`
+- `src/services/ocr/index.ts` - Export `PreprocessOptions`, `runMultiPassOCR`
+
+#### 6. AI Trade Advice (No Chart Analysis)
+Advice based ONLY on extracted trade data and journal history:
+- Risk:Reward calculation and assessment
+- Stop loss distance analysis
+- Trade structure validation
+- Risk level assessment (low/medium/high)
+- Journal history comparison:
+  - Symbol trade count
+  - Win rate for symbol
+  - Most profitable session
+  - Average R:R comparison
+  - Behavior matching
+
+**Files:**
+- `src/services/ai/aiTradeAdvice.ts` - `generateTradeAdvice()` function
+
+#### 7. Automatic Journal Integration
+- Import Trade button creates journal entry
+- Links screenshot analysis to trade
+- Saves imported trade ID in analysis record
+- Marks analysis as "Imported"
+- Never loses relationship between screenshot and journal
+
+**Files:**
+- `src/services/ai/historyStorage.ts` - `markAsImported()`
+- `src/pages/ai/ai-screenshot-analysis.tsx` - Import flow
+
+#### 8. AI Workspace Dashboard Stats
+Statistics displayed on AI Dashboard:
+- Total Analyses
+- Imported count
+- Pending Review count
+- Rejected count
+- Average Confidence
+- Average OCR Accuracy
+- Most traded symbol
+- Recent 7-day activity chart
+
+**Files:**
+- `src/services/ai/historyStorage.ts` - `getDashboardStats()`
+- `src/pages/ai/ai-dashboard.tsx` - `WorkspaceStatsSection` component
+
+### Updated Pipeline (Phase 7C)
+
 ```
 Screenshot
   |
   v
-OCR Text Extraction (Tesseract.js)
+Image Quality Analysis (pre-OCR prediction)
   |
   v
-Parser (SymbolDetector + Price Extractor)
+Enhanced Preprocessing (upscale, contrast, threshold, denoise, sharpen)
   |
   v
-Trade Fusion Engine
+Multi-Pass OCR (3 configurations, best result)
   |
   v
-Review (with sections)
+Text Merge + Parser
   |
   v
-Import
-```
-
-### Future Pipeline (With Vision Provider)
-```
-Screenshot
+Trade Field Extraction (per-field confidence)
   |
   v
-  |-------------------|-------------------|
-  v                   v                   v
-OCR Text        VisionProvider      (parallel)
-Extraction      Analysis
-  |                   |
-  v                   v
-Parser            Chart Understanding
-  |                   |
-  |---------|---------|
-            |
-            v
-  Trade Fusion Engine (combines OCR + Vision)
-            |
-            v
-  Review (with sections + Vision insights)
-            |
-            v
-         Import
+AI Trade Advice (R:R analysis + journal history)
+  |
+  v
+Save to Persistent History
+  |
+  v
+Review UI (color-coded fields)
+  |
+  v
+Import -> Journal Entry (linked)
 ```
 
-## File Structure (Phase 7A)
+### New File Structure
 
 ```
-src/services/ai/vision/
-├── index.ts                          # Centralized exports
-├── VisionProvider.ts                 # Core VisionProvider interface
-├── VisionProviderRegistry.ts         # Provider registry with priority
-├── VisionAnalysisResult.ts           # Comprehensive result types
-├── VisionFeatureTypes.ts             # Detailed feature detection types
-├── types.ts                          # Legacy types (backward compat)
-└── providers/
-    ├── index.ts                      # Provider exports
-    ├── MockVisionProvider.ts         # Development/testing provider
-    └── StubVisionProviders.ts        # OpenAI, Gemini, Claude, OpenRouter stubs
+src/services/ai/
+├── historyStorage.ts          # Persistent history CRUD
+├── imageQuality.ts            # Image quality analysis
+├── aiTradeAdvice.ts           # Trade advice generation
+└── types/
+    └── screenshot-analysis.ts # All Phase 7C types
+
+src/hooks/ai/
+└── useScreenshotHistory.ts    # History React hook
+
+src/services/ocr/
+├── tesseractOCR.ts            # Enhanced preprocessing + multi-pass OCR
+└── index.ts                   # Export PreprocessOptions, runMultiPassOCR
 ```
 
-## Module Responsibilities
+### Key Types
 
-### 1. OCR (Optical Character Recognition) - UNCHANGED
-**Location:** `src/services/ocr/`
-
-**Responsibilities:**
-- Extract visible text from screenshots
-- Extract numbers, broker labels, window titles, chart titles
-- Return raw text + confidence scores
-- NEVER interpret charts or understand visual context
-
-**Key Files:**
-- `tesseractOCR.ts` - Tesseract.js provider implementation with lazy loading
-- `parser.ts` - Text-to-trade parser with price context analysis
-- `symbolDetector.ts` - Advanced symbol detection with alias support
-- `types.ts` - Shared OCR type definitions
-
-### 2. SymbolDetector - UNCHANGED
-**Location:** `src/services/ocr/symbolDetector.ts`
-
-**Responsibilities:**
-- Search across multiple text sources (window title, chart title, broker title, watchlist, OCR blocks)
-- Recognize standard aliases (XAUUSD <-> GOLD, BTCUSD <-> BTCUSDT, etc.)
-- Return normalized standard symbols
-- Return empty string with note if confidence is low (never "Undetected")
-
-### 3. Parser - UNCHANGED
-**Location:** `src/services/ocr/parser.ts`
-
-**Responsibilities:**
-- Convert OCR text into structured trade data
-- Extract prices with context (labels, position, surrounding text)
-- Classify prices: entry, stopLoss, takeProfit, lotSize, chartScale, indicator
-- Filter out chart scale and indicator prices
-- Extract direction from explicit words only (BUY, SELL, LONG, SHORT)
-- Calculate confidence scores per field
-- Calculate quality metrics (OCR Quality, Parser Confidence, Trade Completeness)
-
-### 4. TradeFusionEngine - ENHANCED
-**Location:** `src/services/ai/fusion/`
-
-**Responsibilities:**
-- Combine OCR and Vision provider outputs into unified trade candidates
-- Track source and confidence for each field independently
-- Flag fields that need user review
-- Calculate overall confidence and completeness scores
-- Provide vision provider status information
-- **NEW:** Support for new VisionProvider architecture via `runFusionWithVisionProvider()`
-- **NEW:** Automatic fallback to OCR when vision is unavailable
-- **NEW:** Vision result conversion for backward compatibility
-
-**Key Files:**
-- `TradeFusionEngine.ts` - Engine implementation
-- `types.ts` - Fusion types (enhanced with VisionAnalysisResult support)
-- `index.ts` - Exports (includes new functions)
-
-**Configuration:**
 ```typescript
-interface FusionEngineConfig {
-  enableVision: boolean;        // false by default (free tier)
-  enableOCR: boolean;           // true by default
-  primarySource: "ocr" | "vision" | "auto";
-  minConfidenceThreshold: number;
-  requireExplicitPriceLabels: boolean;
+// ScreenshotAnalysis - Complete analysis record
+interface ScreenshotAnalysis {
+  id: string;
+  screenshotDataUrl: string;
+  ocrText: string;
+  ocrResult: OCRResult | null;
+  extractedTrade: ExtractedTradeData | null;
+  imageQuality: ImageQualityMetrics | null;
+  aiAdvice: TradeAdvice | null;
+  status: "processing" | "needs_review" | "confirmed" | "imported" | "rejected" | "error";
+  reviewStatus: "pending" | "reviewed" | "edited";
+  importStatus: "not_imported" | "imported" | "failed";
+  journalTradeId: string | null;
+  timestamp: number;
+  processingTimeMs: number;
+  fileName: string;
+  fileSize: number;
+}
+
+// ImageQualityMetrics - Pre-OCR quality prediction
+interface ImageQualityMetrics {
+  overall: number;              // 0-100
+  resolution: { width, height, score, label };
+  blur: { score, label };
+  compression: { score, label };
+  brightness: { score, label };
+  contrast: { score, label };
+  textVisibility: { score, label };
+  expectedOCRAccuracy: number;  // Predicted OCR accuracy
+  explanation: string;          // Why confidence is low/high
+  recommendations: string[];    // How to improve
+}
+
+// TradeAdvice - AI-generated advice
+interface TradeAdvice {
+  riskReward: number | null;
+  summary: string;
+  points: string[];
+  riskAssessment: {
+    level: "low" | "medium" | "high";
+    slDistance: number | null;
+    rewardExceedsRisk: boolean;
+    tradeStructureHealthy: boolean;
+  };
+  journalInsights: JournalInsight | null;
+}
+
+// ExtractedTradeData - Structured trade data
+interface ExtractedTradeData {
+  symbol: string;
+  direction: "buy" | "sell" | "" | "unknown";
+  entryPrice, stopLoss, takeProfit, lotSize, riskPercent: number | null;
+  timeframe, broker, date, time, orderType: string | null;
+  fieldConfidences: FieldConfidenceDetail[];
+  overallConfidence: number;
 }
 ```
 
-**NEW Functions:**
-- `runFusionWithVisionProvider()` - Enhanced fusion with VisionProvider integration
-- `initializeVisionRegistry()` - Initialize the vision provider registry
-- `convertVisionResultToLegacy()` - Convert new results to legacy format
-- `enhanceWithVisionData()` - Enhance candidates with VisionExtractedTradeData
-
-### 5. Vision Provider Architecture - NEW (Phase 7A)
-
-#### 5.1 VisionProvider Interface
-**Location:** `src/services/ai/vision/VisionProvider.ts`
-
-```typescript
-interface VisionProvider {
-  readonly name: string;
-  readonly providerId: string;
-  readonly version: string;
-  readonly supportedFeatures: VisionFeatureFlags;
-  isAvailable(): boolean;
-  analyze(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult>;
-  analyzeBatch(imageFiles: File[], options?: VisionRequestOptions): Promise<VisionBatchResult>;
-  healthCheck?(): Promise<{ healthy: boolean; latencyMs: number; message: string }>;
-}
-```
-
-#### 5.2 Vision Analysis Result
-**Location:** `src/services/ai/vision/VisionAnalysisResult.ts`
-
-Comprehensive result types including:
-- `VisionAnalysisResult` - Complete analysis result
-- `VisionChartAnalysis` - Chart pattern detection results
-- `VisionExtractedTradeData` - Trade data extraction results
-- `VisionFeatureFlags` - Feature enablement flags
-- `VisionBatchResult` - Batch processing results
-
-#### 5.3 Vision Feature Types
-**Location:** `src/services/ai/vision/VisionFeatureTypes.ts`
-
-Detailed feature detection types:
-- `DetectedChartPattern` - Chart patterns (triangles, H&S, flags, etc.)
-- `DetectedLevel` - Support/resistance levels
-- `TrendAnalysis` - Trend direction and strength
-- `DetectedCandlestickPattern` - Candlestick patterns
-- `DetectedIndicator` - Technical indicators
-- `DetectedTradeAnnotation` - Trade annotations on chart
-- `VolumeAnalysis` - Volume profile
-- `TimeframeDetection` - Timeframe identification
-- `PlatformDetection` - Broker/platform identification
-
-#### 5.4 Provider Registry
-**Location:** `src/services/ai/vision/VisionProviderRegistry.ts`
-
-Priority-based provider management:
-```typescript
-interface VisionProviderRegistry {
-  register(provider: VisionProvider, priority?: number): void;
-  unregister(providerId: string): boolean;
-  getPrimaryProvider(): VisionProvider | null;
-  getProvider(providerId: string): VisionProvider | null;
-  getAllProviders(): RegisteredVisionProvider[];
-  getAvailableProviders(): VisionProvider[];
-  getProvidersByFeature(feature: VisionFeatureType): VisionProvider[];
-  hasAvailableProvider(): boolean;
-  // ... and more
-}
-```
-
-**Usage:**
-```typescript
-const registry = getVisionProviderRegistry();
-registry.register(new MockVisionProvider(), 0);  // Highest priority
-registry.register(new OpenAIVisionProvider(), 10);
-
-const primary = registry.getPrimaryProvider();
-if (primary) {
-  const result = await primary.analyze(imageFile);
-}
-```
-
-#### 5.5 Mock Vision Provider
-**Location:** `src/services/ai/vision/providers/MockVisionProvider.ts`
-
-- Always available (no API key needed)
-- Returns realistic mock data for all vision features
-- Supports all feature types
-- Simulates processing delays
-- Used for development and testing
-
-#### 5.6 Stub Providers
-**Location:** `src/services/ai/vision/providers/StubVisionProviders.ts`
-
-Stub implementations for:
-- `OpenAIVisionProvider` - OpenAI GPT-4V/GPT-4o
-- `GeminiVisionProvider` - Google Gemini
-- `ClaudeVisionProvider` - Anthropic Claude
-- `OpenRouterVisionProvider` - OpenRouter unified API
-
-All stubs:
-- Return `isAvailable() === false`
-- Throw descriptive errors when called
-- Ready for real implementation
-
-## How to Add a Vision Provider
-
-### Step 1: Implement the VisionProvider interface
-```typescript
-// src/services/ai/vision/providers/MyProvider.ts
-import type { VisionProvider, VisionProviderConfig } from "../VisionProvider";
-import type { VisionAnalysisResult, VisionRequestOptions } from "../VisionAnalysisResult";
-import { DEFAULT_VISION_FEATURE_FLAGS } from "../VisionAnalysisResult";
-
-export class MyVisionProvider implements VisionProvider {
-  readonly name = "My Provider";
-  readonly providerId = "myprovider";
-  readonly version = "1.0.0";
-  readonly supportedFeatures = { ...DEFAULT_VISION_FEATURE_FLAGS };
-
-  private config: VisionProviderConfig;
-
-  constructor(config?: Partial<VisionProviderConfig>) {
-    this.config = {
-      providerId: this.providerId,
-      name: this.name,
-      enabled: true,
-      priority: 10,
-      timeoutMs: 30000,
-      ...config,
-    };
-  }
-
-  isAvailable(): boolean {
-    return !!this.config.apiKey;
-  }
-
-  async analyze(imageFile: File, options?: VisionRequestOptions): Promise<VisionAnalysisResult> {
-    // Implementation here
-  }
-
-  async analyzeBatch(imageFiles: File[], options?: VisionRequestOptions): Promise<VisionBatchResult> {
-    // Implementation here
-  }
-}
-```
-
-### Step 2: Register the provider
-```typescript
-// In your app initialization:
-import { getVisionProviderRegistry } from "@/services/ai/vision";
-import { MyVisionProvider } from "@/services/ai/vision/providers/MyProvider";
-
-const registry = getVisionProviderRegistry();
-registry.register(new MyVisionProvider({
-  apiKey: import.meta.env.VITE_MY_PROVIDER_API_KEY,
-  enabled: true,
-  priority: 1,
-}), 1);
-```
-
-### Step 3: Enable Vision in the Fusion Engine
-```typescript
-import { updateFusionConfig } from "@/services/ai/fusion";
-
-updateFusionConfig({
-  enableVision: true,
-  primarySource: "auto",
-});
-```
-
-## Confidence Metrics
-
-All confidence metrics are measurable and derived from concrete values:
-
-### OCR Quality (0-100)
-- Based on Tesseract.js engine confidence score
-- Measures text recognition quality
-
-### Parser Confidence (0-100)
-- Based on successfully parsed fields
-- Average of individual field confidences
-- Considers explicit labels vs inferred values
-
-### Trade Completeness (0-100)
-- Detected required fields / total required fields
-- Required fields: symbol, direction, entryPrice, stopLoss, takeProfit, positionSize
-
-### Field-Level Confidence
-Each field has its own confidence score:
-- Explicit label found: 0.9-0.95
-- Format match (e.g., EUR/USD): 0.85
-- Context inference: 0.5-0.7
-- Not detected: 0
-
-## Exports
-
-### From `src/services/ai/vision`
-
-**Interfaces:**
-- `VisionProvider` - Main provider interface
-- `VisionProviderConfig` - Provider configuration
-- `VisionProviderCapabilities` - Provider capabilities
-- `VisionProviderRegistry` - Registry interface
-- `RegisteredVisionProvider` - Registry entry type
-
-**Result Types:**
-- `VisionAnalysisResult` - Complete analysis result
-- `VisionExtractedTradeData` - Extracted trade data
-- `VisionChartAnalysis` - Chart analysis result
-- `VisionFieldConfidence` - Field confidence scores
-- `VisionRequestOptions` - Analysis request options
-- `VisionBatchResult` - Batch result
-- `VisionProviderInfo` - Provider information
-
-**Feature Types:**
-- `DetectedChartPattern`, `ChartPatternType`
-- `DetectedLevel`, `LevelType`, `LevelStrength`
-- `TrendAnalysis`, `TrendDirection`, `TrendStrength`
-- `DetectedCandlestickPattern`, `CandlestickPatternType`
-- `DetectedIndicator`, `IndicatorType`, `IndicatorSignal`
-- `DetectedTradeAnnotation`, `AnnotationType`
-- `VolumeAnalysis`, `TimeframeDetection`, `PlatformDetection`
-- `VisionFeatureConfidence`, `DetectedRegion`
-
-**Providers:**
-- `MockVisionProvider`, `getMockVisionProvider`, `resetMockVisionProvider`
-- `OpenAIVisionProvider`, `GeminiVisionProvider`, `ClaudeVisionProvider`, `OpenRouterVisionProvider`
-- `createStubVisionProvider`, `createAllStubVisionProviders`
-
-**Registry Functions:**
-- `getVisionProviderRegistry` - Get singleton registry
-- `resetVisionProviderRegistry` - Reset registry
-- `createVisionProviderRegistry` - Create fresh registry
-
-**Constants:**
-- `DEFAULT_VISION_FEATURE_FLAGS` - Default feature flags
-
-### From `src/services/ai/fusion`
-
-**NEW Functions:**
-- `runFusionWithVisionProvider()` - Enhanced fusion with vision
-- `initializeVisionRegistry()` - Initialize default registry
-
-**Existing Functions (preserved):**
-- `runFusion()` - Original fusion (backward compatible)
-- `getFusionConfig()`, `updateFusionConfig()`, `resetFusionConfig()`
-- `getFusionProgress()`, `getVisionProviderStatus()`
-
-## Backward Compatibility
+### Backward Compatibility
 
 All existing code continues to work without changes:
-- `runFusion()` function signature unchanged
-- Legacy vision types still exported from `src/services/ai/vision/types.ts`
-- Old `VisionProvider` interface from `types.ts` still available
-- OCR pipeline completely untouched
-- All existing hooks, components, and pages work as before
-
-## Testing
-
-Run the following to verify the implementation:
-```bash
-cd app
-npm install
-npm run build    # Verify TypeScript and build
-```
-
-Ensure:
-- No TypeScript errors
-- No build errors
-- All existing tests pass
-- Screenshot Analysis page loads correctly
-- OCR extraction still works
+- OCR pipeline backward compatible
+- Vision provider architecture untouched
+- Existing hooks, components, and pages work as before
+- New features are additive only
 
 ## Phase History
 
 - **Phase 6C:** Initial vision architecture with basic types and stubs
-- **Phase 7A:** Complete vision provider architecture (current)
-  - New VisionProvider interface with feature flags
-  - Comprehensive feature detection types
-  - Provider registry with priority-based selection
-  - Mock provider with realistic data
-  - Stub providers for OpenAI, Gemini, Claude, OpenRouter
-  - Enhanced TradeFusionEngine with vision integration
-  - Full backward compatibility with existing OCR pipeline
+- **Phase 7A:** Complete vision provider architecture
+- **Phase 7B:** Improved AI Vision pipeline and provider framework
+- **Phase 7C:** Production-ready AI Trade Extraction (current)
+  - Persistent AI Workspace History
+  - Smart Screenshot Quality Analysis
+  - Enhanced multi-pass OCR with preprocessing
+  - AI Trade Advice based on journal history
+  - Color-coded review UI
+  - Automatic journal integration
+  - Workspace dashboard statistics

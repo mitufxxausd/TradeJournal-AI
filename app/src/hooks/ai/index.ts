@@ -1,7 +1,3 @@
-/**
- * AI Hooks - Centralized exports
- */
-
 export { useAI } from "./useAI";
 export { useTradeAnalysis } from "./useTradeAnalysis";
 export { useTradeSummary } from "./useTradeSummary";
@@ -10,3 +6,5 @@ export { useOCR } from "./useOCR";
 export { useCoach } from "./useCoach";
 export { useVision } from "./useVision";
 export { useVoice } from "./useVoice";
+export { useScreenshotHistory } from "./useScreenshotHistory";
+export type { UseScreenshotHistoryReturn } from "./useScreenshotHistory";
