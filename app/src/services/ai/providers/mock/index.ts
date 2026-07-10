@@ -7,26 +7,34 @@
 import type {
   AIRequestOptions,
   AIResponse,
+  AIProcessingStatus,
+  SubscriptionTier,
+} from "../../types/common";
+
+import type {
   ChartAnalysisRequest,
   ChartAnalysisResult,
   ChartPattern,
-  KeyLevel,
+  SupportResistance,
+} from "../../types/chart-analysis";
+
+import type {
   TradeAnalysisRequest,
   TradeAnalysisResult,
-  MarketContext,
-  RiskAssessment,
+} from "../../types/trade-analysis";
+
+import type {
   ScreenshotAnalysis,
   ExtractedTradeData,
   DetectedPrice,
   ExtractedFieldStatus,
-  AIProcessingState,
-  SubscriptionTier,
+  KeyLevel,
+  RiskAssessment,
 } from "../../types";
 
 import type {
   ChartAnalysisProvider,
   TradeAnalysisProvider,
-  ProcessingProvider,
 } from "../interfaces";
 
 import {
@@ -47,15 +55,15 @@ import { simulateProcessing } from "../../utils";
 // ─── Mock Provider ───
 
 export class MockAnalysisProvider
-  implements ChartAnalysisProvider, TradeAnalysisProvider, ProcessingProvider
+  implements ChartAnalysisProvider, TradeAnalysisProvider
 {
   readonly name = "Mock AI Provider";
   readonly version = "1.0.0";
   readonly providerId = "mock";
   readonly requiredTier: SubscriptionTier = "free";
 
-  private processingState: AIProcessingState = {
-    status: "pending",
+  private processingState: AIProcessingStatus = {
+    status: "idle",
     progress: 0,
     message: "Waiting for request",
   };
@@ -68,7 +76,7 @@ export class MockAnalysisProvider
   ): Promise<ChartAnalysisResult> {
     const processingTimeMs = await simulateProcessing(800, 2000);
 
-    if (options?.signal?.aborted) {
+    if (options?.abortSignal?.aborted) {
       throw new Error("Analysis was cancelled");
     }
 
@@ -76,42 +84,44 @@ export class MockAnalysisProvider
       .sort(() => Math.random() - 0.5)
       .slice(0, 3)
       .map((p) => ({
-        pattern: p.pattern,
-        confidence: p.confidence,
+        id: generateMockId("pattern"),
+        type: p.pattern.toLowerCase().replace(/\s+/g, "-") as ChartPattern["type"],
+        name: p.pattern,
         direction: p.direction,
+        confidence: p.confidence,
+        startPrice: 1.08 + Math.random() * 0.02,
+        endPrice: 1.09 + Math.random() * 0.02,
+        startTime: new Date().toISOString(),
+        endTime: new Date().toISOString(),
         description: p.description,
+        significance: "high" as const,
+        completionPercent: 75,
       }));
 
-    const keyLevels: KeyLevel[] = mockSupportResistance.map((level) => ({
-      type: level.type,
-      price: level.level,
-      strength: level.strength,
+    const supportResistance: SupportResistance[] = mockSupportResistance.map((level) => ({
+      id: generateMockId("level"),
+      level: level.level,
+      type: level.type as "support" | "resistance" | "pivot",
+      strength: (level.strength > 70 ? "strong" : level.strength > 50 ? "moderate" : "weak") as SupportResistance["strength"],
       touches: level.touches,
+      timeframe: "1H",
+      isActive: true,
     }));
-
-    const marketContext: MarketContext = {
-      trend: pickRandom(["bullish", "bearish", "sideways"]),
-      volatility: pickRandom(["low", "moderate", "high"]),
-      volume: pickRandom(["below_average", "average", "above_average"]),
-      session: "london_ny_overlap",
-      keyEvents: ["Fed speakers scheduled", "NFP data Friday"].filter(() => Math.random() > 0.3),
-    };
-
-    const riskAssessment: RiskAssessment = {
-      riskRewardRatio: [1.5, 2.0, 2.5, 3.0][Math.floor(Math.random() * 4)],
-      riskPercent: [0.5, 1.0, 1.5, 2.0][Math.floor(Math.random() * 4)],
-      potentialProfit: 0,
-      potentialLoss: 0,
-      assessment: "Moderate risk setup with decent risk-reward ratio.",
-      recommendation: "Proceed with proper position sizing.",
-    };
 
     return {
       patterns,
-      keyLevels,
-      marketContext,
-      riskAssessment,
+      indicators: [
+        { type: "ema", name: "EMA 200", value: 1.085, signal: "bullish", interpretation: "Price above EMA 200 indicates bullish trend", period: "200" },
+        { type: "rsi", name: "RSI (14)", value: 55, signal: "neutral", interpretation: "RSI in neutral zone", period: "14" },
+      ],
+      supportResistance,
+      orderBlocks: [],
+      fairValueGaps: [],
+      liquidityZones: [],
+      summary: `Chart analysis completed. Found ${patterns.length} patterns with mixed directional bias.`,
+      overallBias: pickRandom(["bullish", "bearish", "neutral"]),
       confidence: generateMockConfidenceScore(),
+      keyLevels: supportResistance.map((sr) => sr.level),
       metadata: {
         analysisVersion: "1.0.0-mock",
         analyzedAt: new Date().toISOString(),
@@ -130,10 +140,18 @@ export class MockAnalysisProvider
       .sort(() => Math.random() - 0.5)
       .slice(0, 3)
       .map((p) => ({
-        pattern: p.pattern,
-        confidence: p.confidence,
+        id: generateMockId("pattern"),
+        type: p.pattern.toLowerCase().replace(/\s+/g, "-") as ChartPattern["type"],
+        name: p.pattern,
         direction: p.direction,
+        confidence: p.confidence,
+        startPrice: 1.08 + Math.random() * 0.02,
+        endPrice: 1.09 + Math.random() * 0.02,
+        startTime: new Date().toISOString(),
+        endTime: new Date().toISOString(),
         description: p.description,
+        significance: "high" as const,
+        completionPercent: 75,
       }));
   }
 
@@ -144,67 +162,25 @@ export class MockAnalysisProvider
     await simulateProcessing(300, 600);
 
     return mockSupportResistance.map((level) => ({
-      type: level.type,
+      type: level.type as "support" | "resistance" | "entry" | "stopLoss" | "takeProfit" | "pivot",
       price: level.level,
-      strength: level.strength,
-      touches: level.touches,
+      confidence: level.strength / 100,
+      description: `${level.type} level with ${level.touches} touches`,
     }));
   }
 
-  async assessMarketContext(
-    _request: ChartAnalysisRequest,
-    _options?: AIRequestOptions
-  ): Promise<MarketContext> {
-    await simulateProcessing(300, 500);
+  // ─── Chart Analysis Provider Interface ───
 
-    return {
-      trend: pickRandom(["bullish", "bearish", "sideways"]),
-      volatility: pickRandom(["low", "moderate", "high"]),
-      volume: pickRandom(["below_average", "average", "above_average"]),
-      session: "london_ny_overlap",
-      keyEvents: ["Fed speakers scheduled"].filter(() => Math.random() > 0.5),
-    };
-  }
-
-  // ─── Chart Analysis Provider ───
-
-  async analyzeChartRequest(
+  async analyze(
     request: ChartAnalysisRequest,
     options?: AIRequestOptions
   ): Promise<AIResponse<ChartAnalysisResult>> {
-    return this.analyzeChart(request, options).then((data) => ({
+    const data = await this.analyzeChart(request, options);
+    return {
       data,
       provider: "mock",
       model: "mock-gpt-4",
       processingTimeMs: 1000,
-      timestamp: new Date().toISOString(),
-    }));
-  }
-
-  // Satisfy both ChartAnalysisProvider and TradeAnalysisProvider with a unified analyze
-  async analyze(
-    request: ChartAnalysisRequest | TradeAnalysisRequest,
-    options?: AIRequestOptions
-  ): Promise<AIResponse<ChartAnalysisResult | TradeAnalysisResult>> {
-    // Check if it's a ChartAnalysisRequest by looking for chart-specific properties
-    if ("imageUrl" in request || "chartImage" in request) {
-      const result = await this.analyzeChart(request as ChartAnalysisRequest, options);
-      return result as AIResponse<ChartAnalysisResult | TradeAnalysisResult>;
-    }
-    // Otherwise treat as TradeAnalysisRequest
-    return this.analyzeTrade(request as TradeAnalysisRequest, options) as Promise<AIResponse<ChartAnalysisResult | TradeAnalysisResult>>;
-  }
-
-  async detectPatterns(
-    request: ChartAnalysisRequest,
-    options?: AIRequestOptions
-  ): Promise<AIResponse<ChartPattern[]>> {
-    const patterns = await this.detectPatterns(request, options);
-    return {
-      data: patterns,
-      provider: "mock",
-      model: "mock-gpt-4",
-      processingTimeMs: 500,
       timestamp: new Date().toISOString(),
     };
   }
@@ -218,11 +194,37 @@ export class MockAnalysisProvider
     const processingTimeMs = await simulateProcessing(800, 2000);
 
     const result: TradeAnalysisResult = {
-      summary: generateMockTradeSummary(),
-      score: generateMockTradeScore(),
-      confidence: generateMockConfidenceScore(),
-      riskAnalysis: generateMockRiskAnalysis(),
-      suggestions: generateMockTradeSuggestions(),
+      summary: {
+        overview: generateMockTradeSummary(),
+        strengths: ["Good entry timing", "Proper risk management"],
+        weaknesses: ["Could have held longer", "Partial profit taken early"],
+        keyTakeaways: ["Wait for full confirmation", "Stick to target levels"],
+        verdict: "good",
+      },
+      score: {
+        overall: generateMockTradeScore(),
+        entryQuality: Math.floor(60 + Math.random() * 35),
+        exitQuality: Math.floor(55 + Math.random() * 35),
+        riskManagement: Math.floor(65 + Math.random() * 30),
+        psychology: Math.floor(60 + Math.random() * 35),
+        setupQuality: Math.floor(60 + Math.random() * 35),
+        maxScore: 100,
+      },
+      confidence: {
+        level: "high",
+        score: generateMockConfidenceScore(),
+        reasoning: "Multiple confluence factors support this analysis.",
+      },
+      riskAnalysis: {
+        riskRewardRatio: 2.0,
+        riskPercent: 1.0,
+        positionSizing: "optimal",
+        stopLossQuality: "good",
+        takeProfitQuality: "good",
+        maxDrawdownRisk: "low",
+        suggestions: ["Maintain current risk parameters"],
+      },
+      suggestions: [],
       metadata: {
         analysisVersion: "1.0.0-mock",
         analyzedAt: new Date().toISOString(),
@@ -242,22 +244,19 @@ export class MockAnalysisProvider
   // ─── Screenshot Analysis ───
 
   async analyzeScreenshot(
-    imageFile: File,
-    options?: AIRequestOptions
+    _imageFile: File,
+    _options?: AIRequestOptions
   ): Promise<ScreenshotAnalysis> {
     const startTime = Date.now();
 
     this.processingState = {
-      status: "processing",
+      status: "loading",
       progress: 0,
       message: "Analyzing screenshot...",
     };
 
     // Simulate progressive processing
     for (let i = 0; i <= 100; i += 20) {
-      if (options?.signal?.aborted) {
-        throw new Error("Analysis was cancelled");
-      }
       this.processingState.progress = i;
       await simulateProcessing(100, 300);
     }
@@ -296,10 +295,9 @@ export class MockAnalysisProvider
     };
 
     this.processingState = {
-      status: "completed",
+      status: "success",
       progress: 100,
       message: "Analysis complete",
-      endTime: new Date().toISOString(),
     };
 
     return {
@@ -340,20 +338,6 @@ export class MockAnalysisProvider
     };
   }
 
-  // ─── Processing Provider ───
-
-  async getProcessingState(): Promise<AIProcessingState> {
-    return { ...this.processingState };
-  }
-
-  async cancelProcessing(): Promise<void> {
-    this.processingState = {
-      status: "pending",
-      progress: 0,
-      message: "Processing cancelled",
-    };
-  }
-
   // ─── Utility ───
 
   async getStatus(): Promise<{ available: boolean; message: string }> {
@@ -365,6 +349,15 @@ export class MockAnalysisProvider
 
   async validateConfig(): Promise<{ valid: boolean; errors: string[] }> {
     return { valid: true, errors: [] };
+  }
+
+  // Satisfy AIProvider interface from ../interfaces
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  getModels() {
+    return [];
   }
 }
 
