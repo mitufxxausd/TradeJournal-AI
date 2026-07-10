@@ -375,6 +375,9 @@ export function getMockProvider(): MockAnalysisProvider {
   return mockProviderInstance;
 }
 
+/** Singleton instance of the mock provider */
+export const mockProvider = getMockProvider();
+
 // ─── Re-export for convenience ───
 
 export { mockCoachingData, mockChartPatterns, mockSupportResistance };
