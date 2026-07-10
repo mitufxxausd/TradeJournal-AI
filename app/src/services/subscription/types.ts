@@ -37,3 +37,37 @@ export const FEATURE_TIER_MAP: Record<FeatureFlag, SubscriptionTier> = {
   aiTradeScore: "elite",
   futureAiFeatures: "elite",
 };
+
+/**
+ * Feature availability matrix per subscription tier.
+ * Defines which features are enabled (true) or disabled (false) for each tier.
+ */
+export const FEATURE_MATRIX: Record<SubscriptionTier, Record<FeatureFlag, boolean>> = {
+  free: {
+    manualJournal: true,
+    voiceNotes: false,
+    ocr: false,
+    aiScreenshotAnalysis: false,
+    aiCoaching: false,
+    aiTradeScore: false,
+    futureAiFeatures: false,
+  },
+  pro: {
+    manualJournal: true,
+    voiceNotes: true,
+    ocr: true,
+    aiScreenshotAnalysis: true,
+    aiCoaching: false,
+    aiTradeScore: false,
+    futureAiFeatures: false,
+  },
+  elite: {
+    manualJournal: true,
+    voiceNotes: true,
+    ocr: true,
+    aiScreenshotAnalysis: true,
+    aiCoaching: true,
+    aiTradeScore: true,
+    futureAiFeatures: true,
+  },
+};
