@@ -3,7 +3,7 @@
  * Central export point for all AI-related services.
  */
 
-// ─── Types ───
+// ─── Types (from legacy types.ts) ───
 export type {
   AIProvider,
   AIProviderCapabilities,
@@ -36,24 +36,50 @@ export type {
   SubscriptionState,
 } from "./types";
 
+// ─── Common Types (from types/common.ts) ───
+export type {
+  AIProviderName,
+  AIProviderConfig,
+  AIProviderCapability,
+  AIRequestOptions,
+  AIResponse,
+  AIProcessingStatus,
+  AIModelInfo,
+} from "./types/common";
+
+// ─── Mock Provider ───
 export {
   getMockProvider,
   MockAnalysisProvider,
 } from "./providers/mock";
 
+export { getMockAIProvider } from "./providers/mockProvider";
+
 // ─── Analysis Services ───
-export { analyzeTradeSetup } from "./aiService";
-export type { AnalysisConfig } from "./aiService";
+export {
+  analyzeScreenshots,
+  generateTradeAIAnalysis,
+  generateTradeSummary,
+  generateCoaching,
+  transcribeAudio,
+  setAIProvider,
+  getAIProvider,
+  resetToMockProvider,
+  canUseFeature,
+  AIError as AIServiceError,
+} from "./aiService";
+
+export type { AnalyzeScreenshotsOptions } from "./aiService";
 
 // ─── Config ───
 export {
   getDefaultProviderConfigs,
-  getEnabledProviders,
-  getPrimaryProvider,
-  hasRequiredTier,
+  getEnabledProviderConfigs,
+  getActiveProviderName,
+  getProviderConfig,
+  getAISettings,
+  hasRealProviderConfigured,
 } from "./config";
-
-export type { AIProviderConfig, AIProviderRegistryEntry } from "./config";
 
 // ─── Vision ───
 export type {
@@ -115,5 +141,6 @@ export {
   randomFloat,
 } from "./utils";
 
-// ─── Config ───
-export { defaultConfig } from "./config";
+// ─── Provider Factory & Registry ───
+export { ProviderFactory, providerFactory, ProviderFactoryError } from "./providers/factory";
+export { ProviderRegistry, providerRegistry } from "./providers/registry";
