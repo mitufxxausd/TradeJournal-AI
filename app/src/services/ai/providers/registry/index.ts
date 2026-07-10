@@ -1,9 +1,9 @@
 import type {
-  AIProvider,
   AIProviderName,
   AIProviderCapability,
   AIProviderConfig,
 } from "../../types/common";
+import type { AIProvider } from "../interfaces";
 
 /**
  * Provider Registry
