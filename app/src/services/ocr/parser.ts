@@ -1,20 +1,17 @@
 /**
- * Intelligent OCR Trade Parser
- * Parses raw OCR text into structured trade information.
- *
- * Architecture:
- *   OCR Text → Clean → Extract Prices with Context → Filter Chart Scale →
- *   Extract Symbol (fuzzy) → Extract Direction (explicit only) →
- *   Assign Prices (labeled only) → Calculate Confidence → Return Trade
+ * OCR Trade Parser
+ * Converts raw OCR text into structured trade data.
  *
  * Rules:
- * - ONLY reads visible text, NEVER understands charts
- * - Ignores chart price scales, indicator values, volume labels
- * - Ignores TradingView UI, MT4/MT5 toolbars, watermarks
- * - Symbol detection uses fuzzy matching with aliases
- * - Direction ONLY detected from explicit words (BUY, SELL, LONG, SHORT)
- * - TP NEVER comes from chart axis numbers
- * - All fields are editable, never invented
+ * - ONLY detects actual trade fields (symbol, direction, entry, SL, TP, lot size)
+ * - IGNORES: price scale, axis labels, indicator values, TradingView/MT4/MT5 toolbar
+ *   Windows title bar, zoom values, crosshair coordinates, timestamps, watermarks, news widgets, ads
+ * - TP ONLY from explicit labels (TP:, Take Profit:, Target:)
+ * - Direction ONLY from explicit words (BUY, SELL, LONG, SHORT, order types)
+ * - Symbol uses the SymbolDetector with fuzzy matching
+ * - Chart scale numbers are always discarded
+ * - Indicator values (RSI, MACD, EMA, etc.) are always discarded
+ * - Confidence is measurable: based on explicit labels vs context inference
  */
 
 import type {
@@ -24,583 +21,569 @@ import type {
   FieldConfidences,
   OCRQualityMetrics,
   ExtractedFieldStatus,
-  TradeField,
 } from "./types";
-import { getConfidenceLevel, CONFIDENCE_THRESHOLDS, SYMBOL_ALIASES, VALID_TRADING_PAIRS } from "./types";
+import { getConfidenceLevel } from "./types";
+import { detectSymbol } from "./symbolDetector";
 
-// ─── Constants ───
-
-const DIRECTION_WORDS: Record<string, "buy" | "sell"> = {
-  buy: "buy", long: "buy", bullish: "buy", call: "buy",
-  sell: "sell", short: "sell", bearish: "sell", put: "sell",
-} as const;
-
-const EXPLICIT_ORDER_TYPES: Record<string, "buy" | "sell"> = {
-  "buy": "buy",
-  "buy market": "buy",
-  "buy limit": "buy",
-  "buy stop": "buy",
-  "long": "buy",
-  "sell": "sell",
-  "sell market": "sell",
-  "sell limit": "sell",
-  "sell stop": "sell",
-  "short": "sell",
-} as const;
-
-/** Labels that indicate chart price scale or UI elements - discard these numbers */
-const CHART_UI_KEYWORDS = [
-  // Price axis
-  "price", "bid", "ask", "spread",
-  // Time axis
-  "time", "date", "gmt", "utc", "min", "hour", "daily", "weekly", "monthly",
-  // Zoom and UI
-  "zoom", "auto", "log", "lin", "percent", "%",
-  // Indicator labels - numbers near these are NEVER trade prices
-  "rsi", "macd", "ema", "sma", "bb", "bollinger", "atr", "stoch",
-  "volume", "vol", "obv", "cci", "adx", "williams", "ichimoku",
-  "mfi", "momentum", "parabolic", "sar", "psar",
-  // Chart patterns
-  "support", "resistance", "pivot", "fibonacci", "fib", "retracement",
-  // MT4/MT5 specific UI
-  "chart", "period", "template", "object", "navigator", "terminal",
-  "market watch", "data window", " toolbox",
-  // TradingView UI
-  "compare", "indicators", "financials", "templates", "alert",
-  "replay", "goto", "screenshot", "publish", "ideas",
-  // Watermark/common UI
-  "tradingview", "metaquotes", "metatrader", "forex.com", "copyright",
-] as const;
-
-/** Watermark text patterns to remove */
-const WATERMARK_PATTERNS = [
-  /tradingview/gi,
-  /metaquotes/gi,
-  /mt4|mt5|metatrader/gi,
-  /forex\.com/gi,
-  /oanda/gi,
-  /ig\.com/gi,
-  /xm\.com/gi,
-  /icmarkets/gi,
-] as const;
-
-/** Take Profit ONLY comes from these explicit sources */
-const TP_SOURCES = [
-  /\btp\s*[:=-]?\s*[\d.]+/i,
-  /\btake\s*profit\s*[:=-]?\s*[\d.]+/i,
-  /\btarget\s*[:=-]?\s*[\d.]+/i,
-  /\bt\/p\s*[:=-]?\s*[\d.]+/i,
-];
-
-/** Stop Loss explicit sources */
-const SL_SOURCES = [
-  /\bsl\s*[:=-]?\s*[\d.]+/i,
-  /\bstop\s*loss\s*[:=-]?\s*[\d.]+/i,
-  /\bs\/l\s*[:=-]?\s*[\d.]+/i,
-];
-
-/** Entry explicit sources */
-const ENTRY_SOURCES = [
-  /\bentry\s*[:=-]?\s*[\d.]+/i,
-  /\bopen\s*[:=-]?\s*[\d.]+/i,
-  /\bopen\s*price\s*[:=-]?\s*[\d.]+/i,
-  /@\s*[\d.]+/,
-];
-
-/** Numbers that are clearly timestamps, not prices */
-const TIMESTAMP_PATTERNS = [
-  /^\d{2}:\d{2}$/,           // HH:MM
-  /^\d{2}:\d{2}:\d{2}$/,     // HH:MM:SS
-  /^\d{4}-\d{2}-\d{2}$/,     // YYYY-MM-DD
-  /^\d{2}\/\d{2}\/\d{4}$/,   // MM/DD/YYYY
-];
-
-// ─── Text Cleaning ───
-
-/**
- * Clean OCR text by removing watermark text and known UI elements.
- */
-export function cleanOCRText(text: string): string {
-  if (!text) return "";
-  let cleaned = text;
-
-  // Remove watermark patterns
-  for (const pattern of WATERMARK_PATTERNS) {
-    cleaned = cleaned.replace(pattern, "");
-  }
-
-  // Remove common UI text
-  const uiPatterns = [
-    /copyright/gi,
-    /all rights reserved/gi,
-    /www\.[\w.]+/gi,
-  ];
-
-  for (const pattern of uiPatterns) {
-    cleaned = cleaned.replace(pattern, "");
-  }
-
-  return cleaned;
-}
-
-// ─── Symbol/Pair Extraction with Fuzzy Matching ───
+// ─── Utility ───
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// ─── Symbol/Pair Extraction ───
+
+/**
+ * Extract symbol from text using the SymbolDetector.
+ * The SymbolDetector handles aliases, separators, crypto formats, and commodities.
+ */
 function extractSymbol(text: string): { symbol: string; confidence: number; source: string } {
   if (!text || text.trim().length === 0) {
     return { symbol: "", confidence: 0, source: "none" };
   }
 
-  const upperText = text.toUpperCase().replace(/[^A-Z0-9/\s_-]/gi, "");
+  const result = detectSymbol(text);
 
-  // 1. Check symbol aliases first (exact match for "Gold Spot" → XAUUSD etc.)
-  for (const [alias, standardSymbol] of Object.entries(SYMBOL_ALIASES)) {
-    const regex = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
-    if (regex.test(text)) {
-      return { symbol: standardSymbol, confidence: 0.95, source: "alias" };
+  return {
+    symbol: result.symbol,
+    confidence: result.confidence,
+    source: result.source,
+  };
+}
+
+// ─── Direction Detection ───
+
+function extractDirection(text: string): "buy" | "sell" | "unknown" {
+  const lower = text.toLowerCase();
+
+  // Explicit order type keywords with context check
+  const buyPatterns = [
+    /\bbuy\b/i,
+    /\blong\b/i,
+    /\bbuy\s*(?:limit|stop|market)?\b/i,
+    /\border\s*[:\s=]*\s*buy\b/i,
+    /\btype\s*[:\s=]*\s*buy\b/i,
+  ];
+
+  const sellPatterns = [
+    /\bsell\b/i,
+    /\bshort\b/i,
+    /\bsell\s*(?:limit|stop|market)?\b/i,
+    /\border\s*[:\s=]*\s*sell\b/i,
+    /\btype\s*[:\s=]*\s*sell\b/i,
+  ];
+
+  // Check for sell first to avoid "sell" matching inside "buy"
+  for (const pattern of sellPatterns) {
+    if (pattern.test(text)) return "sell";
+  }
+
+  for (const pattern of buyPatterns) {
+    if (pattern.test(text)) return "buy";
+  }
+
+  return "unknown";
+}
+
+// ─── Number Format ───
+
+function parseNumber(value: string): number | null {
+  if (!value || value.trim() === "") return null;
+
+  const cleaned = value
+    .replace(/[\s,]/g, "")           // Remove spaces and commas
+    .replace(/[()]/g, "")            // Remove parentheses
+    .replace(/[a-zA-Z$€£¥]/g, "")    // Remove currency symbols
+    .replace(/[^\d.\-+eE]/g, "");     // Remove non-numeric except ., -, +, e, E
+
+  if (cleaned === "" || cleaned === ".") return null;
+
+  // Handle OANDA "pips only" format like "1.234567" (7+ decimals)
+  const num = parseFloat(cleaned);
+  if (isNaN(num)) return null;
+
+  // Reject clearly invalid numbers
+  if (num === 0 && cleaned !== "0" && cleaned !== "0.0") return null;
+
+  return num;
+}
+
+// ─── Price Context Analysis ───
+
+interface PriceContext {
+  type: "entry" | "stopLoss" | "takeProfit" | "lotSize" | "chartScale" | "indicator" | "unknown";
+  confidence: number;
+  reason: string;
+}
+
+function analyzePriceContext(line: string, index: number, allPrices: DetectedPrice[]): PriceContext {
+  // Check for explicit labels
+  const tpLabels = /\b(tp|take\s*profit|target|profit\s*target|t\.p|t\/p)\b[\s:;=]*/i;
+  const slLabels = /\b(sl|stop\s*loss|stop|s\.l|s\/l)\b[\s:;=]*/i;
+  const entryLabels = /\b(entry|open|opening|price\s*@|@price|entry\s*price|open\s*price|order\s*price)\b[\s:;=]*/i;
+  const lotLabels = /\b(lot|lots|volume|qty|quantity|size|pos\s*size|position\s*size)\b[\s:;=]*/i;
+
+  // Check indicator labels (always discard)
+  const indicatorLabels = /\b(rsi|macd|ema|sma|wma|bollinger|atr|adx|cci|stochastic|mfi|obv|vwap|ichimoku|fibonacci|pivot|sr|support|resistance)\b[\s:;=]*/i;
+
+  // Chart scale detection: isolated prices in a vertical sequence (price ladder)
+  const isPriceLadder = isPartOfPriceLadder(index, allPrices);
+
+  // If it's part of a price ladder, discard
+  if (isPriceLadder) {
+    return { type: "chartScale", confidence: 0.95, reason: "Part of price ladder/scale" };
+  }
+
+  // If it has an indicator label, discard
+  if (indicatorLabels.test(line)) {
+    return { type: "indicator", confidence: 0.95, reason: "Indicator value" };
+  }
+
+  // Take Profit (highest priority)
+  if (tpLabels.test(line)) {
+    return { type: "takeProfit", confidence: 0.95, reason: "Explicit TP label" };
+  }
+
+  // Stop Loss
+  if (slLabels.test(line)) {
+    return { type: "stopLoss", confidence: 0.95, reason: "Explicit SL label" };
+  }
+
+  // Entry Price
+  if (entryLabels.test(line)) {
+    return { type: "entry", confidence: 0.95, reason: "Explicit entry label" };
+  }
+
+  // Lot Size
+  if (lotLabels.test(line)) {
+    return { type: "lotSize", confidence: 0.95, reason: "Explicit lot/volume label" };
+  }
+
+  // If no explicit label, check position context
+  const upperLine = line.toUpperCase();
+
+  // Check if the price is near TP/SL keywords (within same line or context)
+  const hasTPNearby = /\b(tp|take\s*profit|target)\b/i.test(line);
+  const hasSLNearby = /\b(sl|stop\s*loss)\b/i.test(line);
+  const hasEntryNearby = /\b(entry|open|buy|sell|long|short)\b/i.test(line);
+
+  if (hasTPNearby) {
+    return { type: "takeProfit", confidence: 0.7, reason: "TP keyword nearby" };
+  }
+
+  if (hasSLNearby) {
+    return { type: "stopLoss", confidence: 0.7, reason: "SL keyword nearby" };
+  }
+
+  if (hasEntryNearby) {
+    return { type: "entry", confidence: 0.6, reason: "Entry-related keyword nearby" };
+  }
+
+  // Check if the line has a "@" symbol (common for entry prices)
+  if (/@/.test(line)) {
+    return { type: "entry", confidence: 0.5, reason: "@ symbol suggests entry price" };
+  }
+
+  // Default: unknown (will be filtered out if no context)
+  return { type: "unknown", confidence: 0.2, reason: "No clear context" };
+}
+
+// ─── Price Ladder Detection ───
+
+/**
+ * Detect if a price is part of a price ladder/scale on the chart.
+ * Price ladders are sequences of prices at regular intervals (e.g., 1.2345, 1.2346, 1.2347).
+ */
+function isPartOfPriceLadder(index: number, allPrices: DetectedPrice[]): boolean {
+  if (allPrices.length < 3) return false;
+
+  // Check neighboring prices
+  const neighbors: number[] = [];
+
+  for (let i = Math.max(0, index - 2); i <= Math.min(allPrices.length - 1, index + 2); i++) {
+    if (i !== index && allPrices[i].value !== null) {
+      neighbors.push(allPrices[i].value as number);
     }
   }
 
-  // 2. Direct match for known trading pairs
-  for (const pair of VALID_TRADING_PAIRS) {
-    const regex = new RegExp(`\\b${pair}\\b`, "i");
-    if (regex.test(upperText)) {
-      return { symbol: pair, confidence: 0.95, source: "exact" };
-    }
+  if (neighbors.length < 2) return false;
+
+  const currentValue = allPrices[index].value;
+  if (currentValue === null) return false;
+
+  // Check if prices are at regular intervals (characteristic of price ladders)
+  const diffs: number[] = [];
+  for (let i = 1; i < neighbors.length; i++) {
+    diffs.push(Math.abs(neighbors[i] - neighbors[i - 1]));
   }
 
-  // 3. Match with separators: EUR/USD, EUR_USD, EUR-USD
-  const forexPattern = /\b([A-Z]{3})[/\-_]?([A-Z]{3})\b/;
-  const match = upperText.match(forexPattern);
-  if (match) {
-    const combined = `${match[1]}${match[2]}`;
-    return { symbol: combined, confidence: 0.85, source: "separator" };
+  if (diffs.length === 0) return false;
+
+  // If all differences are very similar (within 1% tolerance), it's likely a price ladder
+  const avgDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  const allSimilar = diffs.every((d) => Math.abs(d - avgDiff) / avgDiff < 0.01 || avgDiff < 0.00001);
+
+  if (allSimilar && avgDiff > 0) {
+    return true;
   }
 
-  // 4. Crypto pairs: BTC/USD, BTCUSDT, etc.
-  const cryptoPattern = /\b(BTC|ETH|XRP|LTC|BNB|SOL|ADA|DOT|AVAX|LINK)[/\-_]?(USD|USDT|USDC|EUR|BTC|ETH)\b/i;
-  const cryptoMatch = text.match(cryptoPattern);
-  if (cryptoMatch) {
-    const base = cryptoMatch[1].toUpperCase();
-    const quote = cryptoMatch[2].toUpperCase();
-    // Normalize USDT to USD for consistency
-    const normalizedQuote = quote === "USDT" ? "USD" : quote;
+  return false;
+}
+
+// ─── Main Parsing Function ───
+
+export function parseOCRText(rawText: string): OCRResult {
+  const startTime = Date.now();
+
+  if (!rawText || rawText.trim() === "") {
     return {
-      symbol: `${base}${normalizedQuote}`,
-      confidence: 0.85,
-      source: "crypto",
+      rawText: "",
+      trades: [],
+      detectedPrices: [],
+      confidence: 0,
+      overallConfidence: 0,
+      confidenceLevel: "low",
+      isLowConfidence: true,
+      warning: "No text detected in the image. Please try again with a clearer screenshot.",
+      processingTimeMs: 0,
+      qualityMetrics: {
+        ocrQuality: 0,
+        parserConfidence: 0,
+        tradeCompleteness: 0,
+        fieldsDetected: 0,
+        totalFields: 6,
+      },
     };
   }
 
-  // 5. Chart title / window title extraction
-  const compactPattern = /\b([A-Z]{3,6}(?:USD|EUR|JPY|GBP|CAD|CHF|AUD|NZD))\b/i;
-  const compactMatch = text.match(compactPattern);
-  if (compactMatch) {
-    return { symbol: compactMatch[1].toUpperCase(), confidence: 0.7, source: "compact" };
+  // Clean the text
+  const cleanedText = cleanOCRText(rawText);
+
+  // Extract symbol using SymbolDetector
+  const symbolResult = extractSymbol(cleanedText);
+  const detectedSymbol = symbolResult.symbol;
+
+  // Extract direction
+  const detectedDirection = extractDirection(cleanedText);
+
+  // Extract all numbers that look like prices
+  const detectedPrices = extractPrices(cleanedText);
+
+  // Classify prices with context
+  const classifiedPrices = classifyPrices(detectedPrices, cleanedText);
+
+  // Extract lot size
+  const lotSize = extractLotSize(cleanedText, classifiedPrices);
+
+  // Build trade objects from classified prices
+  const trades = buildTrades(
+    detectedSymbol,
+    detectedDirection,
+    classifiedPrices,
+    lotSize,
+    cleanedText
+  );
+
+  const processingTimeMs = Date.now() - startTime;
+
+  // Calculate overall confidence
+  const overallConfidence = calculateOverallConfidence(trades, detectedSymbol, detectedDirection);
+
+  // Calculate quality metrics
+  const fieldsDetected = trades.length > 0 ? calculateFieldsDetected(trades[0]) : 0;
+  const qualityMetrics: OCRQualityMetrics = {
+    ocrQuality: Math.round(overallConfidence * 0.8), // OCR quality is slightly lower than overall
+    parserConfidence: overallConfidence,
+    tradeCompleteness: trades.length > 0 ? Math.round((fieldsDetected / 6) * 100) : 0,
+    fieldsDetected,
+    totalFields: 6,
+  };
+
+  // Determine confidence level
+  const confidenceLevel = getConfidenceLevel(overallConfidence);
+
+  // Generate warning if needed
+  let warning: string | undefined;
+  if (confidenceLevel === "low") {
+    warning = "Low confidence detection. Please verify all extracted values before importing. Consider taking a clearer screenshot with visible trade labels.";
+  } else if (confidenceLevel === "medium") {
+    warning = "Medium confidence detection. Some fields may need verification. Please review before importing.";
   }
 
-  // 6. Commodities with loose matching
-  const goldPattern = /\b(gold|xau|au)\b/i;
-  const silverPattern = /\b(silver|xag|ag)\b/i;
-  const oilPattern = /\b(wti|brent|crude|oil)\b/i;
-
-  if (goldPattern.test(text)) return { symbol: "XAUUSD", confidence: 0.7, source: "commodity" };
-  if (silverPattern.test(text)) return { symbol: "XAGUSD", confidence: 0.7, source: "commodity" };
-  if (oilPattern.test(text)) return { symbol: "USOIL", confidence: 0.6, source: "commodity" };
-
-  // No symbol detected
-  return { symbol: "", confidence: 0, source: "none" };
+  return {
+    rawText,
+    trades,
+    detectedPrices,
+    confidence: overallConfidence,
+    overallConfidence,
+    confidenceLevel,
+    isLowConfidence: confidenceLevel === "low",
+    warning,
+    processingTimeMs,
+    qualityMetrics,
+  };
 }
 
-// ─── Direction Extraction (Explicit Only) ───
+// ─── Price Extraction ───
 
-function extractDirection(text: string): { direction: "buy" | "sell" | ""; confidence: number } {
-  if (!text || text.trim().length === 0) {
-    return { direction: "", confidence: 0 };
-  }
-
-  const lowerText = text.toLowerCase();
-
-  // 1. Check explicit order type labels first (highest confidence)
-  for (const [label, dir] of Object.entries(EXPLICIT_ORDER_TYPES)) {
-    const regex = new RegExp(`\\b${escapeRegex(label)}\\b`, "i");
-    if (regex.test(lowerText)) {
-      return { direction: dir, confidence: 0.95 };
-    }
-  }
-
-  // 2. Count direction word occurrences
-  let buyCount = 0;
-  let sellCount = 0;
-
-  for (const [word, dir] of Object.entries(DIRECTION_WORDS)) {
-    const regex = new RegExp(`\\b${word}\\b`, "gi");
-    const matches = lowerText.match(regex);
-    if (matches) {
-      if (dir === "buy") buyCount += matches.length;
-      else sellCount += matches.length;
-    }
-  }
-
-  // 3. Only return direction if there's clear evidence
-  if (buyCount > 0 && sellCount === 0) {
-    return { direction: "buy", confidence: Math.min(0.85, 0.6 + buyCount * 0.05) };
-  }
-  if (sellCount > 0 && buyCount === 0) {
-    return { direction: "sell", confidence: Math.min(0.85, 0.6 + sellCount * 0.05) };
-  }
-
-  // 4. Ambiguous - both buy and sell found, leave blank
-  if (buyCount > 0 && sellCount > 0) {
-    return { direction: "", confidence: 0 };
-  }
-
-  // 5. No direction evidence found - leave blank
-  return { direction: "", confidence: 0 };
-}
-
-// ─── Price Extraction with Strict Context ───
-
-/**
- * Extract prices with surrounding context for intelligent classification.
- * KEY RULE: Numbers from chart price scale are ALWAYS discarded.
- */
-function extractPricesWithContext(text: string): DetectedPrice[] {
+function extractPrices(text: string): DetectedPrice[] {
   const prices: DetectedPrice[] = [];
-  const seen = new Set<string>();
-  const lines = text.split(/\n/);
 
-  // Find all numeric patterns with their positions
-  const allMatches: {
-    value: number;
-    lineNum: number;
-    line: string;
-    position: number;
-    original: string;
-  }[] = [];
+  // Match various number formats
+  const patterns = [
+    // Standard decimal: 1.2345, 123.45, 0.00123456
+    /\b\d{1,3}(?:,\d{3})*\.\d{2,8}\b/g,
+    // Compact format: 12345.67
+    /\b\d{4,6}\.\d{2,5}\b/g,
+    // Small numbers: 0.1234
+    /\b0\.\d{2,8}\b/g,
+    // Large numbers with commas: 1,234.56
+    /\b\d{1,3}(?:,\d{3})+\.\d+\b/g,
+    // Integer prices: 1234 (only in specific contexts)
+    /\b\d{4,6}\b/g,
+  ];
 
-  // Match decimal numbers (prices)
-  const pricePattern = /-?\b(\d{1,6}(?:,\d{3})*\.\d{1,5})\b/g;
+  const seenPositions = new Set<number>();
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const pattern of patterns) {
     let match;
-    while ((match = pricePattern.exec(line)) !== null) {
-      const value = parseFloat(match[1].replace(/,/g, ""));
-      if (!isNaN(value)) {
-        allMatches.push({
+    while ((match = pattern.exec(text)) !== null) {
+      const position = match.index;
+      if (seenPositions.has(position)) continue;
+      seenPositions.add(position);
+
+      const value = parseNumber(match[0]);
+      if (value !== null && isValidPrice(value)) {
+        prices.push({
           value,
-          lineNum: i,
-          line: line.trim(),
-          position: match.index,
-          original: match[0],
+          text: match[0],
+          position,
+          confidence: 0.8,
         });
       }
     }
   }
 
-  // Analyze context for each price
-  for (const match of allMatches) {
-    const { value, lineNum, line } = match;
-
-    // Skip if already seen (deduplicate by value+line)
-    const key = `${value}_${lineNum}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    // Skip invalid values
-    if (value <= 0) continue;
-    if (value > 1_000_000) continue;
-
-    const context = analyzePriceContext(line, lineNum, lines, allMatches);
-
-    // Classify based on context
-    const classification = classifyPrice(value, context, match, allMatches);
-
-    prices.push({
-      value,
-      context: context.contextText,
-      classification,
-      confidence: calculatePriceConfidence(value, context, classification),
-    });
-  }
-
-  return prices.sort((a, b) => a.value - b.value);
+  // Sort by position in text
+  return prices.sort((a, b) => a.position - b.position);
 }
 
-interface PriceContext {
-  contextText: string;
-  hasSLLabel: boolean;
-  hasTPLabel: boolean;
-  hasEntryLabel: boolean;
-  hasLotLabel: boolean;
-  hasChartLabel: boolean;
-  hasIndicatorLabel: boolean;
-  isIsolatedPrice: boolean;
-  nearbyPrices: number;
-  isPartOfSequence: boolean;
-  hasPercentageSign: boolean;
-  hasVolumeContext: boolean;
-  isLikelyTimestamp: boolean;
-  lineHasExplicitLabel: boolean;
+function isValidPrice(value: number): boolean {
+  // Filter out obviously invalid prices
+  if (value <= 0) return false;
+  if (value > 1000000) return false; // Unrealistic price
+  return true;
 }
 
-function analyzePriceContext(
-  line: string,
-  lineNum: number,
-  allLines: string[],
-  allMatches: Array<{ value: number; lineNum: number }>
-): PriceContext {
-  const lowerLine = line.toLowerCase();
+// ─── Price Classification ───
 
-  // Check for explicit labels
-  const hasSLLabel = SL_SOURCES.some((p) => p.test(line));
-  const hasTPLabel = TP_SOURCES.some((p) => p.test(line));
-  const hasEntryLabel = ENTRY_SOURCES.some((p) => p.test(line));
-  const hasLotLabel = /\b(lots?|size|volume|qty|quantity|position)\b/i.test(line);
-  const hasPercentageSign = /%/.test(line);
-  const hasVolumeContext = /\b(volume|vol|tick|vwap)\b/i.test(line);
+function classifyPrices(
+  prices: DetectedPrice[],
+  fullText: string
+): Array<DetectedPrice & { context: PriceContext }> {
+  const lines = fullText.split("\n");
 
-  // Check if this is a timestamp, not a price
-  const isLikelyTimestamp = TIMESTAMP_PATTERNS.some((p) => p.test(line.trim()));
+  return prices.map((price, index) => {
+    // Find the line containing this price
+    let line = "";
+    let charCount = 0;
+    for (const l of lines) {
+      if (charCount <= price.position && price.position < charCount + l.length) {
+        line = l;
+        break;
+      }
+      charCount += l.length + 1; // +1 for newline
+    }
 
-  // Check for chart/indicator labels
-  const hasChartLabel = CHART_UI_KEYWORDS.some((label) =>
-    new RegExp(`\\b${escapeRegex(label)}\\b`, "i").test(line)
-  );
-  const hasIndicatorLabel = /\b(rsi|macd|ema\d*|sma\d*|atr|stoch|cci|adx|bollinger|volume|vol|obv|mfi)\b/i.test(line);
+    const context = analyzePriceContext(line, index, prices);
 
-  // Is this an isolated price on its own line? (typical of price axis)
-  const isIsolatedPrice = /^\s*-?\d+\.?\d*\s*$/.test(line);
-
-  // Count nearby prices on adjacent lines
-  const nearbyPrices = allMatches.filter(
-    (m) => m.lineNum >= lineNum - 1 && m.lineNum <= lineNum + 1 && m.lineNum !== lineNum
-  ).length;
-
-  // Check if part of sequential price ladder (chart scale)
-  const sameLinePrices = allMatches.filter((m) => m.lineNum === lineNum).length;
-  const isPartOfSequence = sameLinePrices >= 2 || (isIsolatedPrice && nearbyPrices >= 2);
-
-  // Does this line have an explicit trade label?
-  const lineHasExplicitLabel = hasSLLabel || hasTPLabel || hasEntryLabel || hasLotLabel;
-
-  // Build context text (surrounding lines)
-  const prevLine = lineNum > 0 ? allLines[lineNum - 1].trim() : "";
-  const nextLine = lineNum < allLines.length - 1 ? allLines[lineNum + 1].trim() : "";
-  const contextText = `${prevLine} | ${line} | ${nextLine}`;
-
-  return {
-    contextText,
-    hasSLLabel,
-    hasTPLabel,
-    hasEntryLabel,
-    hasLotLabel,
-    hasChartLabel,
-    hasIndicatorLabel,
-    isIsolatedPrice,
-    nearbyPrices,
-    isPartOfSequence,
-    hasPercentageSign,
-    hasVolumeContext,
-    isLikelyTimestamp,
-    lineHasExplicitLabel,
-  };
-}
-
-function classifyPrice(
-  _value: number,
-  context: PriceContext,
-  _match: { value: number; lineNum: number; line: string; position: number; original: string },
-  _allMatches: Array<{ value: number; lineNum: number }>
-): DetectedPrice["classification"] {
-  // CRITICAL: If it's a timestamp, not a price
-  if (context.isLikelyTimestamp) return "indicator";
-
-  // CRITICAL: If it has a percentage sign, it's not a trade price
-  if (context.hasPercentageSign) return "indicator";
-
-  // CRITICAL: If it's part of a price sequence on the chart scale, discard
-  if (context.isPartOfSequence && context.isIsolatedPrice) return "chartScale";
-
-  // CRITICAL: If it's an isolated price with many nearby prices (price axis ladder)
-  if (context.isIsolatedPrice && context.nearbyPrices >= 3) return "chartScale";
-
-  // If it has a chart/indicator label and no explicit trade label
-  if (context.hasChartLabel && !context.lineHasExplicitLabel) return "chartScale";
-
-  // If it has an indicator label and no explicit trade label
-  if (context.hasIndicatorLabel && !context.lineHasExplicitLabel) return "indicator";
-
-  // If it has volume context
-  if (context.hasVolumeContext && !context.lineHasExplicitLabel) return "indicator";
-
-  // Check for lot size patterns
-  if (context.hasLotLabel) return "lotSize";
-  if (isLikelyLotSize(_value) && !context.lineHasExplicitLabel) {
-    return "lotSize";
-  }
-
-  // Check for explicit labels (highest priority)
-  if (context.hasSLLabel) return "stopLoss";
-  if (context.hasTPLabel) return "takeProfit";
-  if (context.hasEntryLabel) return "entry";
-
-  // Default: unknown (will NOT be assigned to TP/SL/Entry without explicit labels)
-  return "unknown";
-}
-
-function isLikelyLotSize(value: number): boolean {
-  const commonLotSizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
-    0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19,
-    0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90,
-    1.00, 1.50, 2.00, 2.50, 3.00, 4.00, 5.00, 10.00, 15.00, 20.00, 50.00, 100.00];
-
-  return commonLotSizes.some((lot) => Math.abs(value - lot) < 0.001);
-}
-
-function calculatePriceConfidence(
-  value: number,
-  context: PriceContext,
-  classification: DetectedPrice["classification"]
-): number {
-  let confidence = 0.5;
-
-  // Explicit labels boost confidence significantly
-  if (context.hasEntryLabel) confidence += 0.4;
-  if (context.hasSLLabel) confidence += 0.4;
-  if (context.hasTPLabel) confidence += 0.4;
-  if (context.hasLotLabel) confidence += 0.4;
-
-  // Isolated prices without labels = very low confidence
-  if (context.isIsolatedPrice && !context.lineHasExplicitLabel) {
-    confidence = 0.1;
-  }
-
-  // Chart/indicator context eliminates confidence
-  if (context.hasChartLabel && !context.lineHasExplicitLabel) confidence = 0;
-  if (context.hasIndicatorLabel && !context.lineHasExplicitLabel) confidence = 0.05;
-  if (context.hasPercentageSign) confidence = 0;
-  if (context.isLikelyTimestamp) confidence = 0;
-
-  // Volume context reduces confidence
-  if (context.hasVolumeContext) confidence -= 0.3;
-
-  // Lot size values
-  if (classification === "lotSize" && isLikelyLotSize(value)) {
-    confidence += 0.2;
-  }
-
-  return Math.max(0, Math.min(1, confidence));
+    return {
+      ...price,
+      context,
+    };
+  });
 }
 
 // ─── Lot Size Extraction ───
 
-function extractLotSize(text: string, prices: DetectedPrice[]): { lotSize: number | null; confidence: number } {
-  // Look for explicit lot patterns: "0.50 lots", "Size: 1.00"
-  const lotPattern = /(\d+\.?\d*)\s*(?:lots?|lot)/i;
+function extractLotSize(
+  text: string,
+  classifiedPrices: Array<DetectedPrice & { context: PriceContext }>
+): number | null {
+  // Look for explicit lot size mentions
+  const lotPattern = /(?:lot|volume|qty|quantity|size)\s*[:\s=]*\s*(\d+\.?\d*)/i;
   const lotMatch = text.match(lotPattern);
   if (lotMatch) {
-    const value = parseFloat(lotMatch[1]);
-    if (!isNaN(value) && value > 0 && value <= 1000) {
-      return { lotSize: value, confidence: 0.95 };
+    const value = parseNumber(lotMatch[1]);
+    if (value !== null && value > 0 && value < 1000) {
+      return value;
     }
   }
 
-  // Look for "Size: X.XX" patterns
-  const sizePattern = /(?:size|volume|qty|quantity)[\s:]*(\d+\.?\d*)/i;
-  const sizeMatch = text.match(sizePattern);
-  if (sizeMatch) {
-    const value = parseFloat(sizeMatch[1]);
-    if (!isNaN(value) && value > 0 && value <= 1000) {
-      return { lotSize: value, confidence: 0.9 };
+  // Check classified prices for lot size
+  for (const price of classifiedPrices) {
+    if (price.context.type === "lotSize") {
+      return price.value;
     }
   }
 
-  // Try to find lot size from classified prices
-  const lotPrice = prices.find((p) => p.classification === "lotSize" && p.confidence >= 0.5);
-  if (lotPrice && isLikelyLotSize(lotPrice.value)) {
-    return { lotSize: lotPrice.value, confidence: lotPrice.confidence };
-  }
-
-  return { lotSize: null, confidence: 0 };
+  return null;
 }
 
-// ─── Multi-Trade Detection ───
+// ─── Trade Building ───
 
-function detectMultipleTrades(text: string): { count: number; segments: string[] } {
-  // Look for explicit position/trade identifiers
-  const ticketPattern = /(?:ticket|position|trade|order)\s*#?\s*(\d+)/gi;
-  const tickets = text.match(ticketPattern);
+function buildTrades(
+  symbol: string,
+  direction: "buy" | "sell" | "unknown",
+  classifiedPrices: Array<DetectedPrice & { context: PriceContext }>,
+  lotSize: number | null,
+  fullText: string
+): OCRTrade[] {
+  // Filter out chart scale and indicator prices
+  const validPrices = classifiedPrices.filter(
+    (p) => p.context.type !== "chartScale" && p.context.type !== "indicator" && p.context.type !== "unknown"
+  );
 
-  if (tickets && tickets.length >= 2) {
-    const segments = text
-      .split(/(?=\b(?:ticket|position|trade|order)\s*#?\s*\d+)/gi)
-      .filter((s) => s.trim().length > 10);
-    return { count: segments.length || tickets.length, segments };
+  if (validPrices.length === 0 && !symbol && direction === "unknown") {
+    return [];
   }
 
-  // Check for multiple direction keywords on different lines with substantial text between
-  const lines = text.split(/\n/);
-  const directionBlocks: string[] = [];
-  let currentBlock = "";
+  // Group prices by type
+  const entryPrices = validPrices.filter((p) => p.context.type === "entry");
+  const slPrices = validPrices.filter((p) => p.context.type === "stopLoss");
+  const tpPrices = validPrices.filter((p) => p.context.type === "takeProfit");
 
-  for (const line of lines) {
-    if (/(?:buy|sell|long|short)/i.test(line) && currentBlock.length > 50) {
-      directionBlocks.push(currentBlock);
-      currentBlock = line + "\n";
-    } else {
-      currentBlock += line + "\n";
+  // Get the best price for each category (highest confidence)
+  const entryPrice = entryPrices.length > 0
+    ? entryPrices.reduce((best, p) => p.confidence > best.confidence ? p : best).value
+    : null;
+
+  const stopLoss = slPrices.length > 0
+    ? slPrices.reduce((best, p) => p.confidence > best.confidence ? p : best).value
+    : null;
+
+  const takeProfit = tpPrices.length > 0
+    ? tpPrices.reduce((best, p) => p.confidence > best.confidence ? p : best).value
+    : null;
+
+  // Calculate field confidences
+  const fieldConfidences: FieldConfidences = {
+    symbol: symbol ? (symbolResultFromText(symbol, fullText) ? 0.95 : 0.8) : 0,
+    direction: direction !== "unknown" ? 0.9 : 0,
+    entryPrice: entryPrice !== null ? 0.9 : 0,
+    stopLoss: stopLoss !== null ? 0.9 : 0,
+    takeProfit: takeProfit !== null ? 0.9 : 0,
+    positionSize: lotSize !== null ? 0.9 : 0,
+  };
+
+  // Calculate risk/reward if we have both SL and TP
+  let riskReward: number | null = null;
+  if (entryPrice !== null && stopLoss !== null && takeProfit !== null) {
+    const risk = Math.abs(entryPrice - stopLoss);
+    const reward = Math.abs(takeProfit - entryPrice);
+    if (risk > 0) {
+      riskReward = Math.round((reward / risk) * 100) / 100;
     }
   }
-  if (currentBlock.length > 10) {
-    directionBlocks.push(currentBlock);
-  }
 
-  if (directionBlocks.length >= 2) {
-    return { count: directionBlocks.length, segments: directionBlocks };
-  }
+  const trade: OCRTrade = {
+    symbol,
+    direction,
+    entryPrice,
+    stopLoss,
+    takeProfit,
+    positionSize: lotSize,
+    riskReward,
+    confidence: overallFieldConfidence(fieldConfidences),
+    fieldConfidences,
+    rawText: fullText.slice(0, 200), // First 200 chars for context
+  };
 
-  return { count: 1, segments: [text] };
+  return [trade];
 }
 
-// ─── Order Type Extraction ───
+// ─── Confidence Calculation ───
 
-function extractOrderTypes(text: string): string[] {
-  const types: string[] = [];
-  const orderKeywords = [
-    "market", "limit", "stop", "stop loss", "take profit",
-    "pending", "buy stop", "sell stop", "buy limit", "sell limit",
-  ];
-
-  for (const keyword of orderKeywords) {
-    if (new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i").test(text)) {
-      types.push(keyword);
-    }
-  }
-
-  return types;
+function overallFieldConfidence(confidences: FieldConfidences): number {
+  const values = Object.values(confidences);
+  const sum = values.reduce((a, b) => a + b, 0);
+  return Math.round((sum / values.length) * 100);
 }
 
-// ─── Quality Metrics Calculation ───
+function calculateOverallConfidence(
+  trades: OCRTrade[],
+  symbol: string,
+  direction: "buy" | "sell" | "unknown"
+): number {
+  if (trades.length === 0) {
+    // If we at least have a symbol or direction, give partial credit
+    let partial = 0;
+    if (symbol) partial += 30;
+    if (direction !== "unknown") partial += 20;
+    return partial;
+  }
 
-function calculateQualityMetrics(
-  trade: OCRTrade,
-  ocrConfidence: number
-): OCRQualityMetrics {
-  const detectedFields: ExtractedFieldStatus[] = [
+  return trades[0].confidence;
+}
+
+function calculateFieldsDetected(trade: OCRTrade): number {
+  let count = 0;
+  if (trade.symbol) count++;
+  if (trade.direction !== "unknown") count++;
+  if (trade.entryPrice !== null) count++;
+  if (trade.stopLoss !== null) count++;
+  if (trade.takeProfit !== null) count++;
+  if (trade.positionSize !== null) count++;
+  return count;
+}
+
+// ─── Text Cleaning ───
+
+export function cleanOCRText(text: string): string {
+  if (!text) return "";
+
+  let cleaned = text;
+
+  // Remove TradingView watermark
+  cleaned = cleaned.replace(/TradingView/gi, "");
+
+  // Remove MetaQuotes watermarks
+  cleaned = cleaned.replace(/MetaQuotes/gi, "");
+
+  // Remove common UI elements
+  cleaned = cleaned.replace(/\b(Login|File|View|Insert|Charts|Tools|Window|Help)\b/g, "");
+  cleaned = cleaned.replace(/\b(New Order|Order|Modify|Delete|Close)\b/g, "");
+  cleaned = cleaned.replace(/\b(M1|M5|M15|M30|H1|H4|D1|W1|MN)\b/g, "");
+
+  // Remove zoom indicators
+  cleaned = cleaned.replace(/\d+%\s*zoom/gi, "");
+
+  // Remove crosshair coordinates
+  cleaned = cleaned.replace(/\d{2}:\d{2}:\d{2}\s+\d+\.?\d*/g, "");
+
+  // Clean up multiple spaces and newlines
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+  return cleaned;
+}
+
+// ─── Extracted Fields ───
+
+export function getExtractedFields(trades: OCRTrade[]): ExtractedFieldStatus[] {
+  if (trades.length === 0) return [];
+
+  const trade = trades[0];
+
+  return [
     {
       field: "symbol",
-      detected: trade.symbol !== "" && trade.symbol !== "Symbol not detected",
+      detected: trade.symbol !== "",
       confidence: trade.fieldConfidences.symbol,
-      source: trade.fieldConfidences.symbol > 0.7 ? "explicit_label" : trade.fieldConfidences.symbol > 0 ? "context_inference" : "none",
+      source: trade.fieldConfidences.symbol > 0.7 ? "fuzzy_match" : "none",
     },
     {
       field: "direction",
-      detected: trade.direction !== "" && trade.direction !== "unknown",
+      detected: trade.direction !== "unknown",
       confidence: trade.fieldConfidences.direction,
       source: trade.fieldConfidences.direction > 0.7 ? "explicit_label" : trade.fieldConfidences.direction > 0 ? "context_inference" : "none",
     },
@@ -629,272 +612,46 @@ function calculateQualityMetrics(
       source: trade.fieldConfidences.positionSize > 0.7 ? "explicit_label" : trade.fieldConfidences.positionSize > 0 ? "context_inference" : "none",
     },
   ];
-
-  const fieldsDetected = detectedFields.filter((f) => f.detected).length;
-  const totalFields = 6;
-
-  // OCR Quality: based on Tesseract confidence (0-100)
-  const ocrQuality = Math.round(ocrConfidence);
-
-  // Parser Confidence: based on successful parsing of fields
-  const parserConfidence = Math.round(
-    (detectedFields.reduce((sum, f) => sum + f.confidence, 0) / totalFields) * 100
-  );
-
-  // Trade Completeness: percentage of fields detected
-  const tradeCompleteness = Math.round((fieldsDetected / totalFields) * 100);
-
-  return {
-    ocrQuality,
-    parserConfidence,
-    tradeCompleteness,
-    fieldsDetected,
-    totalFields,
-    detectedFields,
-  };
 }
 
-// ─── Trade Segment Parser ───
+// ─── Per-Trade Symbol Source Detection ───
 
-function parseTradeSegment(
-  segment: string,
-  allPrices: DetectedPrice[],
-  ocrConfidence: number
-): { trade: OCRTrade | null; qualityMetrics: OCRQualityMetrics | null } {
-  const symbolResult = extractSymbol(segment);
-  const directionResult = extractDirection(segment);
-
-  // Get prices specific to this segment
-  const segmentPrices = extractPricesWithContext(segment);
-
-  // Use segment-specific prices if available, otherwise filter from all prices
-  const relevantPrices = segmentPrices.length >= 2
-    ? segmentPrices
-    : allPrices.filter((p) => segment.includes(String(p.value)));
-
-  // STRICT FILTER: Discard ALL chart scale and indicator prices
-  const tradePrices = relevantPrices.filter(
-    (p) => p.classification !== "chartScale" && p.classification !== "indicator" && p.confidence > 0.3
-  );
-
-  // Extract lot size
-  const lotResult = extractLotSize(segment, relevantPrices);
-
-  // Assign values based on classification ONLY
-  let entryPrice: number | null = null;
-  let stopLoss: number | null = null;
-  let takeProfit: number | null = null;
-
-  const entryPrices = tradePrices.filter((p) => p.classification === "entry" && p.confidence >= 0.5);
-  const slPrices = tradePrices.filter((p) => p.classification === "stopLoss" && p.confidence >= 0.5);
-  const tpPrices = tradePrices.filter((p) => p.classification === "takeProfit" && p.confidence >= 0.5);
-
-  // Get the highest confidence entry price (must have explicit label)
-  if (entryPrices.length > 0) {
-    entryPrice = entryPrices.sort((a, b) => b.confidence - a.confidence)[0].value;
-  }
-
-  // Get the highest confidence SL (must have explicit label)
-  if (slPrices.length > 0) {
-    stopLoss = slPrices.sort((a, b) => b.confidence - a.confidence)[0].value;
-  }
-
-  // Get ONLY the highest confidence TP (must have explicit TP label)
-  // CRITICAL: TP only from explicit labels, never from chart axis
-  if (tpPrices.length > 0) {
-    takeProfit = tpPrices.sort((a, b) => b.confidence - a.confidence)[0].value;
-  }
-
-  // Validate: entry should not be a lot size
-  if (entryPrice !== null && lotResult.lotSize !== null) {
-    if (Math.abs(entryPrice - lotResult.lotSize) < 0.001) {
-      entryPrice = null;
-    }
-  }
-
-  // Validate: entry should not be an unrealistic value
-  if (entryPrice !== null && isLikelyLotSize(entryPrice) && entryPrice < 1) {
-    entryPrice = null;
-  }
-
-  // Calculate R:R
-  let riskReward: number | null = null;
-  if (entryPrice && stopLoss && takeProfit) {
-    const risk = Math.abs(entryPrice - stopLoss);
-    const reward = Math.abs(takeProfit - entryPrice);
-    if (risk > 0) {
-      riskReward = parseFloat((reward / risk).toFixed(2));
-    }
-  }
-
-  // Build field confidences
-  const fieldConfidences: FieldConfidences = {
-    symbol: symbolResult.confidence,
-    direction: directionResult.confidence,
-    entryPrice: entryPrice !== null ? (entryPrices.length > 0 ? entryPrices[0].confidence : 0) : 0,
-    stopLoss: stopLoss !== null ? (slPrices.length > 0 ? slPrices[0].confidence : 0) : 0,
-    takeProfit: takeProfit !== null ? (tpPrices.length > 0 ? tpPrices[0].confidence : 0) : 0,
-    positionSize: lotResult.confidence,
-  };
-
-  // Calculate overall confidence
-  const fieldValues = Object.values(fieldConfidences);
-  const avgFieldConfidence = fieldValues.reduce((a, b) => a + b, 0) / fieldValues.length;
-  const overallConfidence = Math.round(
-    (avgFieldConfidence * 0.6 + (ocrConfidence / 100) * 0.4) * 100
-  );
-
-  const trade: OCRTrade = {
-    symbol: symbolResult.symbol || "",
-    direction: directionResult.direction || "unknown",
-    entryPrice,
-    stopLoss,
-    takeProfit,
-    positionSize: lotResult.lotSize,
-    riskReward,
-    confidence: Math.min(100, Math.max(0, overallConfidence)),
-    fieldConfidences,
-    rawText: segment.trim(),
-  };
-
-  // Calculate quality metrics
-  const qualityMetrics = calculateQualityMetrics(trade, ocrConfidence);
-
-  return { trade, qualityMetrics };
+function symbolResultFromText(symbol: string, text: string): boolean {
+  // Check if symbol was found via direct text match
+  return text.toUpperCase().includes(symbol);
 }
 
-// ─── Main Parser Function ───
+// ─── Calculate Trade Completeness ───
 
-/**
- * Parse raw OCR text into structured trade data.
- * Workflow: OCR Text → Clean → Extract Prices → Filter Chart Scale →
- *           Extract Symbol/Direction → Assign Prices → Quality Metrics
- */
-export function parseOCRText(text: string, ocrConfidence: number): OCRResult {
-  const startTime = Date.now();
-
-  if (!text || text.trim().length === 0) {
-    return {
-      rawText: "",
-      trades: [],
-      detectedPrices: [],
-      detectedOrderTypes: [],
-      overallConfidence: 0,
-      confidenceLevel: "low",
-      processingTimeMs: 0,
-      error: "No text detected in image",
-      qualityMetrics: {
-        ocrQuality: 0,
-        parserConfidence: 0,
-        tradeCompleteness: 0,
-        fieldsDetected: 0,
-        totalFields: 6,
-        detectedFields: [],
-      },
-    };
-  }
-
-  // Step 1: Clean the text
-  const cleanedText = cleanOCRText(text);
-
-  // Step 2: Detect multiple trades
-  const { count, segments } = detectMultipleTrades(cleanedText);
-
-  // Step 3: Extract all prices with context
-  const allPrices = extractPricesWithContext(cleanedText);
-
-  // Step 4: Filter out chart scale and indicator prices from display list
-  const relevantPrices = allPrices.filter(
-    (p) => p.classification !== "chartScale" && p.classification !== "indicator"
-  );
-
-  // Step 5: Parse each trade segment
-  const trades: OCRTrade[] = [];
-  let allQualityMetrics: OCRQualityMetrics | null = null;
-
-  if (count > 1 && segments.length > 1) {
-    for (const segment of segments) {
-      if (segment.trim().length > 5) {
-        const { trade, qualityMetrics } = parseTradeSegment(segment, allPrices, ocrConfidence);
-        if (trade && (trade.symbol || trade.entryPrice !== null)) {
-          trades.push(trade);
-          if (qualityMetrics) allQualityMetrics = qualityMetrics;
-        }
-      }
-    }
-  }
-
-  // If no trades parsed from segments, parse the whole text
+export function calculateTradeCompleteness(trades: OCRTrade[]): {
+  completeness: number;
+  detectedFields: number;
+  totalFields: number;
+  missingFields: string[];
+} {
   if (trades.length === 0) {
-    const { trade, qualityMetrics } = parseTradeSegment(cleanedText, allPrices, ocrConfidence);
-    if (trade && (trade.symbol || trade.entryPrice !== null)) {
-      trades.push(trade);
-      if (qualityMetrics) allQualityMetrics = qualityMetrics;
-    }
+    return { completeness: 0, detectedFields: 0, totalFields: 6, missingFields: ["symbol", "direction", "entryPrice", "stopLoss", "takeProfit", "positionSize"] };
   }
 
-  const orderTypes = extractOrderTypes(cleanedText);
-  const processingTimeMs = Date.now() - startTime;
+  const t = trades[0];
+  const detected = [
+    t.symbol !== "", t.direction !== "unknown",
+    t.entryPrice !== null, t.stopLoss !== null,
+    t.takeProfit !== null, t.positionSize !== null,
+  ].filter(Boolean).length;
 
-  // Calculate overall confidence
-  const overallConfidence = trades.length > 0
-    ? Math.round(trades.reduce((sum, t) => sum + t.confidence, 0) / trades.length)
-    : Math.round(ocrConfidence * 0.5); // Lower if no trades found
-
-  const confidenceLevel = getConfidenceLevel(overallConfidence);
-
-  // Aggregate quality metrics for all trades
-  let qualityMetrics: OCRQualityMetrics;
-  if (allQualityMetrics && trades.length === 1) {
-    qualityMetrics = allQualityMetrics;
-  } else if (trades.length > 0) {
-    // Average across all trades
-    const avgFieldsDetected = Math.round(
-      trades.reduce((sum, t) => {
-        const detected = [
-          t.symbol !== "", t.direction !== "" && t.direction !== "unknown",
-          t.entryPrice !== null, t.stopLoss !== null,
-          t.takeProfit !== null, t.positionSize !== null,
-        ].filter(Boolean).length;
-        return sum + detected;
-      }, 0) / trades.length
-    );
-    qualityMetrics = {
-      ocrQuality: Math.round(ocrConfidence),
-      parserConfidence: overallConfidence,
-      tradeCompleteness: Math.round((avgFieldsDetected / 6) * 100),
-      fieldsDetected: avgFieldsDetected,
-      totalFields: 6,
-      detectedFields: [],
-    };
-  } else {
-    qualityMetrics = {
-      ocrQuality: Math.round(ocrConfidence),
-      parserConfidence: 0,
-      tradeCompleteness: 0,
-      fieldsDetected: 0,
-      totalFields: 6,
-      detectedFields: [],
-    };
-  }
-
-  // Generate warning if confidence is low
-  let warning: string | undefined;
-  if (confidenceLevel === "low") {
-    warning = "Low confidence detection. Please review all extracted values before importing.";
-  } else if (confidenceLevel === "medium") {
-    warning = "Some fields need review. Please verify extracted trade data before importing.";
-  }
+  const missing: string[] = [];
+  if (!t.symbol) missing.push("symbol");
+  if (t.direction === "unknown") missing.push("direction");
+  if (t.entryPrice === null) missing.push("entryPrice");
+  if (t.stopLoss === null) missing.push("stopLoss");
+  if (t.takeProfit === null) missing.push("takeProfit");
+  if (t.positionSize === null) missing.push("positionSize");
 
   return {
-    rawText: cleanedText,
-    trades,
-    detectedPrices: relevantPrices,
-    detectedOrderTypes: orderTypes,
-    overallConfidence,
-    confidenceLevel,
-    processingTimeMs,
-    warning,
-    qualityMetrics,
+    completeness: Math.round((detected / 6) * 100),
+    detectedFields: detected,
+    totalFields: 6,
+    missingFields: missing,
   };
 }

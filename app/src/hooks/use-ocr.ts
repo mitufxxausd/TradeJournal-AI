@@ -1,12 +1,14 @@
 /**
  * useOCR Hook
- * Hook for running OCR on images with progress tracking.
- * Uses the intelligent parser layer for trade extraction.
+ * Manages OCR processing state and integrates with the TradeFusionEngine
+ * for combining OCR and Vision analysis outputs.
  */
 
 import { useState, useCallback, useRef } from "react";
 import { runOCR, cancelOCR, preloadTesseract } from "@/services/ocr";
+import { runFusion, getVisionProviderStatus } from "@/services/ai/fusion";
 import type { OCRResult, OCROptions } from "@/services/ocr";
+import type { FusionResult, VisionProviderStatus } from "@/services/ai/fusion";
 import { CONFIDENCE_THRESHOLDS } from "@/services/ocr";
 
 export type OCRStatus = "idle" | "processing" | "completed" | "error";
@@ -14,6 +16,7 @@ export type OCRStatus = "idle" | "processing" | "completed" | "error";
 export interface UseOCRReturn {
   status: OCRStatus;
   result: OCRResult | null;
+  fusionResult: FusionResult | null;
   progress: number;
   error: string | null;
   run: (imageFile: File, options?: OCROptions) => Promise<OCRResult | null>;
@@ -27,11 +30,14 @@ export interface UseOCRReturn {
   canAutoFill: boolean;
   /** Human-readable confidence status message */
   confidenceMessage: string | null;
+  /** Current AI Vision provider status */
+  visionStatus: VisionProviderStatus;
 }
 
 export function useOCR(): UseOCRReturn {
   const [status, setStatus] = useState<OCRStatus>("idle");
   const [result, setResult] = useState<OCRResult | null>(null);
+  const [fusionResult, setFusionResult] = useState<FusionResult | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const isCancelledRef = useRef(false);
@@ -42,6 +48,7 @@ export function useOCR(): UseOCRReturn {
     setProgress(0);
     setError(null);
     setResult(null);
+    setFusionResult(null);
 
     try {
       const ocrResult = await runOCR(imageFile, {
@@ -56,6 +63,10 @@ export function useOCR(): UseOCRReturn {
       if (isCancelledRef.current) {
         return null;
       }
+
+      // Run the Trade Fusion Engine to combine OCR results
+      const fusion = await runFusion(imageFile, ocrResult, null);
+      setFusionResult(fusion);
 
       if (ocrResult.error && ocrResult.trades.length === 0) {
         setError(ocrResult.error);
@@ -88,6 +99,7 @@ export function useOCR(): UseOCRReturn {
     cancelOCR();
     setStatus("idle");
     setResult(null);
+    setFusionResult(null);
     setProgress(0);
     setError(null);
   }, []);
@@ -96,19 +108,20 @@ export function useOCR(): UseOCRReturn {
     preloadTesseract();
   }, []);
 
-  // Derive auto-fill capability from confidence
-  const canAutoFill = result !== null &&
-    result.overallConfidence >= CONFIDENCE_THRESHOLDS.MEDIUM &&
-    result.confidenceLevel !== "low";
+  // Determine confidence status
+  const canAutoFill = result ? result.overallConfidence >= CONFIDENCE_THRESHOLDS.HIGH : false;
 
-  // Human-readable confidence message
-  const confidenceMessage = result
-    ? getConfidenceMessage(result)
-    : null;
+  const confidenceMessage = (() => {
+    if (!result) return null;
+    if (result.confidenceLevel === "high") return "High confidence - review recommended before importing";
+    if (result.confidenceLevel === "medium") return "Medium confidence - please review fields before importing";
+    return "Low confidence - all fields must be verified before importing";
+  })();
 
   return {
     status,
     result,
+    fusionResult,
     progress,
     error,
     run,
@@ -120,20 +133,6 @@ export function useOCR(): UseOCRReturn {
     isError: status === "error",
     canAutoFill,
     confidenceMessage,
+    visionStatus: getVisionProviderStatus(),
   };
-}
-
-function getConfidenceMessage(result: OCRResult): string {
-  if (result.error) return `Error: ${result.error}`;
-
-  switch (result.confidenceLevel) {
-    case "high":
-      return `High confidence (${result.overallConfidence}%) - Results look reliable.`;
-    case "medium":
-      return `Medium confidence (${result.overallConfidence}%) - Please review before importing.`;
-    case "low":
-      return `Low confidence (${result.overallConfidence}%) - Please review OCR results before importing.`;
-    default:
-      return `Confidence: ${result.overallConfidence}%`;
-  }
 }

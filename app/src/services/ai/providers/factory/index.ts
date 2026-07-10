@@ -1,4 +1,5 @@
-import type { AIProvider, AIProviderName, AIProviderConfig } from "../../types/common";
+import type { AIProviderName, AIProviderConfig } from "../../types/common";
+import type { AIProvider } from "../interfaces";
 import { ProviderRegistry, providerRegistry } from "../registry";
 
 /**
