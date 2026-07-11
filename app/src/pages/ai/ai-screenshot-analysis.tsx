@@ -26,7 +26,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useOCR } from "@/hooks/use-ocr";
 import { useScreenshotHistory } from "@/hooks/ai";
@@ -34,14 +33,14 @@ import { useTrades } from "@/hooks/use-trades";
 import { analyzeImageQuality, generateTradeAdvice, ocrResultToExtractedTrade } from "@/services/ai";
 import { uploadToCloudinary, compressImage } from "@/services/cloudinaryService";
 import type { OCRResult } from "@/services/ocr";
-import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData, FieldConfidenceDetail } from "@/services/ai";
+import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData } from "@/services/ai";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Camera, Upload, X, Maximize2, Trash2, Loader2, Lock,
   TrendingUp, TrendingDown, Minus, Sparkles, AlertTriangle,
-  FileText, Eye, ChevronDown, ChevronUp, Check, Pencil,
-  XCircle, Plus, ScanText, BarChart3, Info, Monitor, Brain,
+  FileText, ChevronDown, ChevronUp, Check, Pencil,
+  XCircle, Plus, ScanText, BarChart3, Info, Brain,
   History, Gauge, Lightbulb, Copy, RotateCcw, ChevronLeft,
   ThumbsUp, ThumbsDown, Save,
 } from "lucide-react";
@@ -611,7 +610,7 @@ export default function AIScreenshotAnalysis() {
       else if (fieldKey === "entryprice" || fieldKey === "entry") newVal = updatedTrade.entryPrice;
       else if (fieldKey === "stoploss" || fieldKey === "sl") newVal = updatedTrade.stopLoss;
       else if (fieldKey === "takeprofit" || fieldKey === "tp") newVal = updatedTrade.takeProfit;
-      else if (fieldKey === "lotsize" || fieldKey === "position size") newVal = updatedTrade.lotSize;
+      else if (fieldKey === "lotsize" || fieldKey === "positionsize") newVal = updatedTrade.lotSize;
       return {
         ...fc,
         value: newVal,
