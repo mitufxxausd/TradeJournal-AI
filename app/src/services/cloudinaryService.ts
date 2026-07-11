@@ -183,7 +183,7 @@ export function uploadToCloudinary(
     const formData = new FormData();
     formData.append("file", file, filename);
     formData.append("upload_preset", UPLOAD_PRESET);
-    formData.append("return_delete_token", "true");
+    
 
     // Add folder if provided (e.g., "trade-journal/{userId}")
     if (options?.folder) {
