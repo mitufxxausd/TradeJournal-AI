@@ -32,7 +32,6 @@ import { useScreenshotHistory } from "@/hooks/ai";
 import { useTrades } from "@/hooks/use-trades";
 import { analyzeImageQuality, generateTradeAdvice, ocrResultToExtractedTrade } from "@/services/ai";
 import { uploadToCloudinary, compressImage } from "@/services/cloudinaryService";
-import type { OCRResult } from "@/services/ocr";
 import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData } from "@/services/ai";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
