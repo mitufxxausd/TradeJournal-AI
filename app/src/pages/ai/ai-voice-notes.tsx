@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { useSpeechRecognition, isSpeechRecognitionSupported } from "@/hooks/use-speech-recognition";
-import { formatDuration } from "@/services/voice/voiceService";
+import { formatDuration, uploadVoiceNoteToCloudinary } from "@/services/voice/voiceService";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -127,6 +127,7 @@ export default function AIVoiceNotes() {
   const [editingTranscript, setEditingTranscript] = useState<string | null>(null);
   const [editTranscriptValue, setEditTranscriptValue] = useState("");
   const [isMediaSupported, setIsMediaSupported] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -202,13 +203,30 @@ export default function AIVoiceNotes() {
 
   // ─── Save Recording ───
 
-  const handleSaveRecording = useCallback(() => {
-    if (!recorder.audioUrl) return;
+  const handleSaveRecording = useCallback(async () => {
+    if (!recorder.audioBlob || !recorder.audioUrl) return;
+
+    setIsUploading(true);
+    let persistentUrl = recorder.audioUrl;
+
+    // Upload to Cloudinary for persistent storage
+    try {
+      const fileName = `voice-note-${Date.now()}.webm`;
+      const result = await uploadVoiceNoteToCloudinary(recorder.audioBlob, fileName);
+      if (result.url && !result.url.startsWith("blob:")) {
+        persistentUrl = result.url;
+      }
+    } catch (uploadErr) {
+      console.warn("Cloudinary voice upload failed, using local blob:", uploadErr);
+      // Fall back to blob URL - note: this won't survive refresh but at least works for current session
+    } finally {
+      setIsUploading(false);
+    }
 
     const newNote: VoiceNote = {
       id: `vn_${Date.now()}`,
       name: `Recording ${voiceNotes.length + 1}`,
-      audioUrl: recorder.audioUrl,
+      audioUrl: persistentUrl,
       duration: recorder.duration,
       createdAt: new Date().toISOString(),
       transcript: speech.transcript,
@@ -244,6 +262,7 @@ export default function AIVoiceNotes() {
       });
 
       audio.addEventListener("error", () => {
+        toast.error("Playback failed. The audio may have expired. Try re-recording.");
         setPlayingId(null);
         audioRef.current = null;
       });
@@ -307,7 +326,7 @@ export default function AIVoiceNotes() {
   const handleDelete = useCallback((id: string) => {
     try {
       const note = voiceNotes.find((n) => n.id === id);
-      if (note?.audioUrl) {
+      if (note?.audioUrl && note.audioUrl.startsWith("blob:")) {
         URL.revokeObjectURL(note.audioUrl);
       }
       setVoiceNotes((prev) => prev.filter((n) => n.id !== id));
@@ -537,8 +556,9 @@ export default function AIVoiceNotes() {
                       size="lg"
                       className="h-12 w-12 rounded-full p-0"
                       onClick={handleSaveRecording}
+                      disabled={isUploading}
                     >
-                      <Check className="h-5 w-5" />
+                      {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
                     </Button>
                     <Button
                       variant="ghost"
