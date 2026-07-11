@@ -1,17 +1,161 @@
 /**
  * AI Trade Advice Service
- * Phase 7C: Smart Journal Integration
+ * Phase 7D-1: Enhanced AI Trade Advice
  *
- * Provides trading advice based ONLY on extracted trade data and
- * journal history. Does NOT analyze chart patterns.
+ * Provides trading advice based on extracted trade data and
+ * journal history. Supports both OCR-extracted data and
+ * AI-enhanced extraction results.
  */
 
-import type { TradeAdvice, JournalInsight, ExtractedTradeData } from "./types/screenshot-analysis";
+import type { TradeAdvice, JournalInsight, ExtractedTradeData, FieldConfidenceDetail } from "./types/screenshot-analysis";
+import type { AIExtractedTrade, AIAdviceResult } from "./types/ai-extraction";
 import type { Trade } from "@/types";
 
 const MIN_RR_RATIO = 1.0;
 const GOOD_RR_RATIO = 1.5;
 const EXCELLENT_RR_RATIO = 2.0;
+
+// ─── Enhanced Advice from AI Extraction ───
+
+/**
+ * Convert AI extraction trade data to the legacy ExtractedTradeData format
+ */
+export function aiTradeToExtractedTrade(aiTrade: AIExtractedTrade): ExtractedTradeData {
+  const fieldConfidences: FieldConfidenceDetail[] = [
+    {
+      field: "symbol",
+      value: aiTrade.symbol || null,
+      confidence: aiTrade.symbol ? 0.92 : 0,
+      status: aiTrade.symbol ? "detected" : "missing",
+      source: aiTrade.symbol ? "ai_extraction" : "none",
+    },
+    {
+      field: "direction",
+      value: aiTrade.side || null,
+      confidence: aiTrade.side ? 0.9 : 0,
+      status: aiTrade.side ? "detected" : "missing",
+      source: aiTrade.side ? "ai_extraction" : "none",
+    },
+    {
+      field: "entryPrice",
+      value: aiTrade.entry ?? null,
+      confidence: aiTrade.entry !== null ? 0.88 : 0,
+      status: aiTrade.entry !== null ? "detected" : "missing",
+      source: aiTrade.entry !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "stopLoss",
+      value: aiTrade.sl ?? null,
+      confidence: aiTrade.sl !== null ? 0.88 : 0,
+      status: aiTrade.sl !== null ? "detected" : "missing",
+      source: aiTrade.sl !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "takeProfit",
+      value: aiTrade.tp ?? null,
+      confidence: aiTrade.tp !== null ? 0.88 : 0,
+      status: aiTrade.tp !== null ? "detected" : "missing",
+      source: aiTrade.tp !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "lotSize",
+      value: aiTrade.positionSize ?? null,
+      confidence: aiTrade.positionSize !== null ? 0.85 : 0,
+      status: aiTrade.positionSize !== null ? "detected" : "missing",
+      source: aiTrade.positionSize !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "riskPercent",
+      value: aiTrade.riskPercent ?? null,
+      confidence: aiTrade.riskPercent !== null ? 0.82 : 0,
+      status: aiTrade.riskPercent !== null ? "detected" : "missing",
+      source: aiTrade.riskPercent !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "broker",
+      value: aiTrade.broker ?? null,
+      confidence: aiTrade.broker !== null ? 0.8 : 0,
+      status: aiTrade.broker !== null ? "detected" : "missing",
+      source: aiTrade.broker !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "timeframe",
+      value: aiTrade.timeframe ?? null,
+      confidence: aiTrade.timeframe !== null ? 0.8 : 0,
+      status: aiTrade.timeframe !== null ? "detected" : "missing",
+      source: aiTrade.timeframe !== null ? "ai_extraction" : "none",
+    },
+    {
+      field: "orderType",
+      value: aiTrade.orderType ?? null,
+      confidence: aiTrade.orderType !== null ? 0.78 : 0,
+      status: aiTrade.orderType !== null ? "detected" : "missing",
+      source: aiTrade.orderType !== null ? "ai_extraction" : "none",
+    },
+  ];
+
+  const detectedCount = fieldConfidences.filter((f) => f.status === "detected").length;
+  const totalFields = fieldConfidences.length;
+
+  return {
+    symbol: aiTrade.symbol ?? "",
+    direction: aiTrade.side ?? "unknown",
+    entryPrice: aiTrade.entry ?? null,
+    stopLoss: aiTrade.sl ?? null,
+    takeProfit: aiTrade.tp ?? null,
+    lotSize: aiTrade.positionSize ?? null,
+    riskPercent: aiTrade.riskPercent ?? null,
+    timeframe: aiTrade.timeframe ?? null,
+    broker: aiTrade.broker ?? null,
+    date: null,
+    time: null,
+    orderType: aiTrade.orderType ?? null,
+    fieldConfidences,
+    overallConfidence: Math.round((detectedCount / totalFields) * 100),
+  };
+}
+
+/**
+ * Convert AI advice result to legacy TradeAdvice format
+ */
+export function aiAdviceToTradeAdvice(aiAdvice: AIAdviceResult): TradeAdvice {
+  const riskLevel: "low" | "medium" | "high" =
+    aiAdvice.quality >= 70 ? "low" : aiAdvice.quality >= 40 ? "medium" : "high";
+
+  const points: string[] = [
+    ...aiAdvice.suggestions,
+    ...aiAdvice.mistakes.map((m) => `Note: ${m}`),
+  ];
+
+  return {
+    riskReward: aiAdvice.rr,
+    summary: aiAdvice.risk || generateSummaryFromAdvice(aiAdvice),
+    points: points.length > 0 ? points : ["Review trade parameters before executing."],
+    riskAssessment: {
+      level: riskLevel,
+      slDistance: null,
+      rewardExceedsRisk: aiAdvice.rr !== null && aiAdvice.rr >= 1,
+      tradeStructureHealthy: aiAdvice.quality >= 60,
+    },
+    journalInsights: null,
+  };
+}
+
+function generateSummaryFromAdvice(advice: AIAdviceResult): string {
+  const parts: string[] = [];
+  if (advice.rr !== null) {
+    if (advice.rr >= EXCELLENT_RR_RATIO) parts.push(`Excellent R:R of 1:${advice.rr.toFixed(1)}.`);
+    else if (advice.rr >= GOOD_RR_RATIO) parts.push(`Good R:R of 1:${advice.rr.toFixed(1)}.`);
+    else if (advice.rr >= MIN_RR_RATIO) parts.push(`Acceptable R:R of 1:${advice.rr.toFixed(1)}.`);
+    else parts.push(`Poor R:R of 1:${advice.rr.toFixed(1)}. Risk exceeds reward.`);
+  }
+  if (advice.risk) parts.push(advice.risk);
+  if (advice.mistakes.length > 0) parts.push(`${advice.mistakes.length} potential issue(s) detected.`);
+  if (advice.suggestions.length > 0) parts.push(`${advice.suggestions.length} suggestion(s) available.`);
+  return parts.join(" ") || "Review trade parameters before executing.";
+}
+
+// ─── Legacy Functions ───
 
 export function generateTradeAdvice(trade: ExtractedTradeData, journalTrades: Trade[] = []): TradeAdvice {
   const points: string[] = [];
@@ -91,7 +235,7 @@ function assessRiskLevel(trade: ExtractedTradeData, riskReward: number | null): 
   return "low";
 }
 
-function generateSummary(trade: ExtractedTradeData, riskReward: number | null, riskLevel: "low" | "medium" | "high", structureHealthy: boolean): string {
+function generateSummary(_trade: ExtractedTradeData, riskReward: number | null, riskLevel: "low" | "medium" | "high", structureHealthy: boolean): string {
   const parts: string[] = [];
   if (structureHealthy && riskReward && riskReward >= GOOD_RR_RATIO) parts.push("Trade structure looks healthy.");
   else if (structureHealthy) parts.push("Trade structure is acceptable.");
@@ -107,7 +251,7 @@ function generateJournalInsights(trade: ExtractedTradeData, journalTrades: Trade
   if (!trade.symbol || journalTrades.length === 0) return null;
   const symbol = trade.symbol.toUpperCase();
   const symbolTrades = journalTrades.filter((t) => {
-    const tSym = (t.pair || t.symbol || "").toUpperCase();
+    const tSym = (t.pair || "").toUpperCase();
     return tSym === symbol || (symbol.includes(tSym) && tSym.length >= 3) || (tSym.includes(symbol) && symbol.length >= 3);
   });
   const symbolTradeCount = symbolTrades.length;
@@ -115,13 +259,13 @@ function generateJournalInsights(trade: ExtractedTradeData, journalTrades: Trade
     return { symbolTradeCount: 0, symbolWinRate: null, mostProfitableSession: null, averageRR: null, matchesSuccessfulBehavior: false, message: `This is your first ${symbol} trade in your journal. Good luck!` };
   }
 
-  const completedTrades = symbolTrades.filter((t) => t.result === "win" || t.result === "loss");
-  const wins = completedTrades.filter((t) => t.result === "win").length;
+  const completedTrades = symbolTrades.filter((t) => t.status === "win" || t.status === "loss");
+  const wins = completedTrades.filter((t) => t.status === "win").length;
   const symbolWinRate = completedTrades.length > 0 ? Math.round((wins / completedTrades.length) * 100) : null;
 
   const sessionProfits: Record<string, number> = {};
   for (const t of symbolTrades) {
-    if (t.session) sessionProfits[t.session] = (sessionProfits[t.session] || 0) + (typeof t.pnl === "number" ? t.pnl : 0);
+    if (t.session) sessionProfits[t.session] = (sessionProfits[t.session] || 0) + (typeof t.profitLoss === "number" ? t.profitLoss : 0);
   }
   let mostProfitableSession: string | null = null;
   let maxProfit = -Infinity;
@@ -129,8 +273,8 @@ function generateJournalInsights(trade: ExtractedTradeData, journalTrades: Trade
     if (profit > maxProfit) { maxProfit = profit; mostProfitableSession = session; }
   }
 
-  const tradesWithRR = symbolTrades.filter((t) => typeof t.riskReward === "number" && t.riskReward > 0);
-  const averageRR = tradesWithRR.length > 0 ? Math.round((tradesWithRR.reduce((sum, t) => sum + (t.riskReward || 0), 0) / tradesWithRR.length) * 10) / 10 : null;
+  const tradesWithRR = symbolTrades.filter((t) => typeof t.rrRatio === "number" && t.rrRatio > 0);
+  const averageRR = tradesWithRR.length > 0 ? Math.round((tradesWithRR.reduce((sum, t) => sum + (t.rrRatio || 0), 0) / tradesWithRR.length) * 10) / 10 : null;
   const currentRR = calculateRiskReward(trade);
   const matchesSuccessfulBehavior = (symbolWinRate !== null && symbolWinRate >= 50) || (averageRR !== null && currentRR !== null && currentRR >= averageRR * 0.8);
 

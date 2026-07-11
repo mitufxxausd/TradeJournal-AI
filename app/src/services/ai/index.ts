@@ -1,332 +1,121 @@
-export type { OCROptions } from "@/services/ocr";
+/**
+ * AI Services
+ *
+ * Central export point for all AI-related services.
+ * Follows the barrel pattern for clean imports.
+ */
 
-// ─── Types ───
-export type {
-  AIResponse,
-  AIResponseStream,
-  AIRequestOptions,
-  AITextOptions,
-  AIMessage,
-  AISystemMessage,
-  AIUsage,
-  AIError,
-  AIErrorCode,
-  AISession,
-  AIProviderType,
-  AIProviderConfig,
-  AIServiceStatus,
-  AIProcessingMetrics,
-  AIHealthStatus,
-  AIQuotaInfo,
-  AIStreamChunk,
-  AIStreamToken,
-  AIStreamToolCall,
-  AIStreamToolResult,
-  AIStreamEnd,
-  AIStreamError,
-  AIStreamEvent,
-} from "./types/common";
+// ─── AI Trade Advice ───
+export { generateTradeAdvice, ocrResultToExtractedTrade, aiTradeToExtractedTrade, aiAdviceToTradeAdvice } from "./aiTradeAdvice";
+export type { TradeAdvice, JournalInsight, ExtractedTradeData, FieldConfidenceDetail, AnalysisConfirmation, ScreenshotAnalysis, ImageQualityMetrics, AnalysisStatus, WorkspaceDashboardStats, GroupedAnalyses, HistoryFilters } from "./types/screenshot-analysis";
 
-export type {
-  AITradeAnalysis,
-  AITradeReview,
-  AIPerformanceMetrics,
-  AITradeInsights,
-  AIJournalAnalysis,
-  AIWinRateAnalysis,
-  AIEmotionAnalysis,
-  AITradePattern,
-  AIRecommendation,
-  AIConfidence,
-  AIFeedback,
-  AITradeSummary,
-  AITradeQuery,
-  AIAnalysisResult,
-  AIAnalysisStatus,
-  AIProcessingStage,
-  AIMarketContext,
-  AIPositionAnalysis,
-  AIPositionSize,
-  AICorrelation,
-  AITradeSimilarity,
-  AIPeriod,
-  AIComparison,
-  AIComparisonType,
-  AIPerformanceBreakdown,
-  AITradeStrength,
-  AITradeWeakness,
-  AITradeOpportunity,
-  AITradeThreat,
-  AISWOTAnalysis,
-  AIImprovementArea,
-  AIGoalProgress,
-  AITradingGoal,
-  AITradingPlan,
-  AITradingPlanStep,
-  AITradingPlanStatus,
-  AITradingPlanReview,
-} from "./types/trade-analysis";
-
-export type {
-  AIChartAnalysis,
-  AIChartPattern,
-  AIChartIndicator,
-  AIChartSignal,
-  AIChartTrend,
-  AIChartSupportResistance,
-  AIChartFibonacci,
-  AIChartWave,
-  AIChartCandlestick,
-  AIChartTimeframe,
-  AIChartType,
-  AIChartFeature,
-  AIChartFeatureType,
-  AIChartFeatureConfidence,
-  AIChartFeatureLocation,
-  AIChartFeatureMetadata,
-  AIChartAnalysisResult,
-  AIChartAnalysisStatus,
-  AIChartAnalysisOptions,
-  AIChartAnalysisRequest,
-  AIChartAnalysisResponse,
-  AIChartProviderType,
-  AIChartProvider,
-  AIChartProviderConfig,
-  AIChartProviderStatus,
-  AIChartProviderCapabilities,
-  AIChartProviderLimitations,
-  AIChartProviderQuota,
-  AIChartProviderUsage,
-  AIChartProviderHealth,
-} from "./types/chart-analysis";
-
-export type {
-  OCRRequest,
-  OCRResponse,
-  OCRProvider,
-  OCRProviderType,
-  OCRProviderConfig,
-  OCRProviderStatus,
-  OCRProviderCapabilities,
-  OCRProviderLimitations,
-  OCRProviderQuota,
-  OCRProviderUsage,
-  OCRProviderHealth,
-  OCRImage,
-  OCRText,
-  OCRWord,
-  OCRLine,
-  OCRParagraph,
-  OCRBlock,
-  OCRRegion,
-  OCRLanguage,
-  OCRConfidence,
-  OCRError,
-  OCRErrorCode,
-  OCRProcessingOptions,
-  OCRProcessingResult,
-  OCRProcessingStatus,
-  OCRProcessingStage,
-  OCRQualityMetrics,
-  OCRQualityScore,
-  OCRQualityLevel,
-  OCRQualityAssessment,
-  OCRQualityReport,
-  OCRQualityIssue,
-  OCRQualityIssueType,
-  OCRQualityIssueSeverity,
-  OCRQualityIssueLocation,
-  OCRQualityIssueRecommendation,
-  OCRPreprocessingOptions,
-  OCRPreprocessingResult,
-  OCRPreprocessingStatus,
-  OCRPreprocessingStage,
-  OCRPostprocessingOptions,
-  OCRPostprocessingResult,
-  OCRPostprocessingStatus,
-  OCRPostprocessingStage,
-  OCRTextExtraction,
-  OCRTextExtractionOptions,
-  OCRTextExtractionResult,
-  OCRTextExtractionStatus,
-  OCRTextExtractionStage,
-  OCRTextRecognition,
-  OCRTextRecognitionOptions,
-  OCRTextRecognitionResult,
-  OCRTextRecognitionStatus,
-  OCRTextRecognitionStage,
-  OCRTextDetection,
-  OCRTextDetectionOptions,
-  OCRTextDetectionResult,
-  OCRTextDetectionStatus,
-  OCRTextDetectionStage,
-  OCRTextStructure,
-  OCRTextStructureOptions,
-  OCRTextStructureResult,
-  OCRTextStructureStatus,
-  OCRTextStructureStage,
-  OCRTextAnalysis,
-  OCRTextAnalysisOptions,
-  OCRTextAnalysisResult,
-  OCRTextAnalysisStatus,
-  OCRTextAnalysisStage,
-  OCRTextUnderstanding,
-  OCRTextUnderstandingOptions,
-  OCRTextUnderstandingResult,
-  OCRTextUnderstandingStatus,
-  OCRTextUnderstandingStage,
-  OCRTextReasoning,
-  OCRTextReasoningOptions,
-  OCRTextReasoningResult,
-  OCRTextReasoningStatus,
-  OCRTextReasoningStage,
-} from "./types/ocr";
-
-export type {
-  AICoachingSession,
-  AICoachingMessage,
-  AICoachingResponse,
-  AICoachingContext,
-  AICoachingGoal,
-  AICoachingPlan,
-  AICoachingProgress,
-  AICoachingFeedback,
-  AICoachingInsight,
-  AICoachingRecommendation,
-  AICoachingStrategy,
-  AICoachingTechnique,
-  AICoachingExercise,
-  AICoachingAssessment,
-  AICoachingMetrics,
-  AICoachingPersonality,
-  AICoachingStyle,
-  AICoachingMode,
-  AICoachingLevel,
-  AICoachingTopic,
-  AICoachingQuestion,
-  AICoachingAnswer,
-  AICoachingScenario,
-  AICoachingRole,
-  AICoachingPersona,
-  AICoachingTone,
-  AICoachingVoice,
-  AICoachingLanguage,
-  AICoachingConfig,
-  AICoachingOptions,
-  AICoachingRequest,
-  AICoachingResult,
-  AICoachingStatus,
-  AICoachingProvider,
-  AICoachingProviderType,
-  AICoachingProviderConfig,
-  AICoachingProviderStatus,
-  AICoachingProviderCapabilities,
-  AICoachingProviderLimitations,
-  AICoachingProviderQuota,
-  AICoachingProviderUsage,
-  AICoachingProviderHealth,
-} from "./types/coaching";
-
-export type {
-  AITranscriptionRequest,
-  AITranscriptionResponse,
-  AITranscriptionSegment,
-  AITranscriptionWord,
-  AITranscriptionSpeaker,
-  AITranscriptionLanguage,
-  AITranscriptionConfidence,
-  AITranscriptionError,
-  AITranscriptionErrorCode,
-  AITranscriptionProvider,
-  AITranscriptionProviderType,
-  AITranscriptionProviderConfig,
-  AITranscriptionProviderStatus,
-  AITranscriptionProviderCapabilities,
-  AITranscriptionProviderLimitations,
-  AITranscriptionProviderQuota,
-  AITranscriptionProviderUsage,
-  AITranscriptionProviderHealth,
-  AITranscriptionOptions,
-  AITranscriptionResult,
-  AITranscriptionStatus,
-  AITranscriptionStage,
-  AITranscriptionQuality,
-  AITranscriptionQualityMetrics,
-  AITranscriptionQualityScore,
-  AITranscriptionQualityLevel,
-  AITranscriptionQualityAssessment,
-  AITranscriptionQualityReport,
-  AITranscriptionQualityIssue,
-  AITranscriptionQualityIssueType,
-  AITranscriptionQualityIssueSeverity,
-  AITranscriptionQualityIssueLocation,
-  AITranscriptionQualityIssueRecommendation,
-  AITranscriptionProcessingOptions,
-  AITranscriptionProcessingResult,
-  AITranscriptionProcessingStatus,
-  AITranscriptionProcessingStage,
-  AITranscriptionPreprocessingOptions,
-  AITranscriptionPreprocessingResult,
-  AITranscriptionPreprocessingStatus,
-  AITranscriptionPreprocessingStage,
-  AITranscriptionPostprocessingOptions,
-  AITranscriptionPostprocessingResult,
-  AITranscriptionPostprocessingStatus,
-  AITranscriptionPostprocessingStage,
-} from "./types/transcription";
-
-// ─── Screenshot Analysis (Phase 7C) ───
-export type {
-  ScreenshotAnalysis,
-  AnalysisHistory,
-  AnalysisStatus,
-  ImageQualityMetrics,
-  FieldConfidenceDetail,
-  ExtractedTradeData,
-  TradeAdvice,
-  JournalInsight,
-  WorkspaceDashboardStats,
-  GroupedAnalyses,
-  HistoryGroup,
-  HistoryFilters,
-  HistorySort,
-} from "./types/screenshot-analysis";
-
-export {
-  getHistory,
-  saveAnalysis,
-  updateAnalysis,
-  getAnalysis,
-  deleteAnalysis,
-  duplicateAnalysis,
-  getAllAnalyses,
-  filterAnalyses,
-  groupAnalysesByDate,
-  getDashboardStats,
-  markAsImported,
-  clearHistory,
-  getStorageInfo,
-} from "./historyStorage";
-
+// ─── Image Quality Analysis ───
 export { analyzeImageQuality } from "./imageQuality";
 
-export { generateTradeAdvice, ocrResultToExtractedTrade } from "./aiTradeAdvice";
-
-// ─── Utils ───
+// ─── History Storage ───
 export {
-  delay,
-  simulateProcessing,
-  generateAIId,
-  withRetry,
-  isAbortError,
-  getErrorMessage,
-  formatProcessingTime,
-  clamp,
-  randomPick,
-  randomInt,
-  randomFloat,
-} from "./utils";
+  saveAnalysis,
+  getAnalysis,
+  getAllAnalyses,
+  updateAnalysis,
+  deleteAnalysis,
+  duplicateAnalysis,
+  clearAllAnalyses,
+  markAsImported,
+  getDashboardStats,
+  groupAnalysesByDate,
+  filterAnalyses,
+} from "./historyStorage";
+
+// ─── Fusion Engine ───
+export { TradeFusionEngine } from "./fusion/TradeFusionEngine";
+export { runFusion, getVisionProviderStatus } from "./fusion";
+export type { FusionResult, FusionConfig } from "./fusion";
+
+// ─── AI Extraction (Phase 7D-1) ───
+export type {
+  AIExtractionResult,
+  AIExtractionRequest,
+  AIExtractionOptions,
+  AIExtractedTrade,
+  AIConfidenceScores,
+  AIAdviceResult,
+  AITradeAdviceItem,
+  RawAIExtractionResponse,
+  AIExtractionErrorCode,
+} from "./types/ai-extraction";
+export { AIExtractionError } from "./types/ai-extraction";
+
+export {
+  extractTradeWithAI,
+  quickExtract,
+} from "./aiExtraction";
+
+export {
+  buildTradeExtractionPrompt,
+  buildRetryPrompt,
+  buildVisionExtractionPrompt,
+  parseAIExtractionResponse,
+  normalizeExtractionResponse,
+} from "./prompts";
 
 // ─── Provider Factory & Registry ───
 export { ProviderFactory, providerFactory, ProviderFactoryError } from "./providers/factory";
 export { ProviderRegistry, providerRegistry } from "./providers/registry";
+
+// ─── Utilities ───
+export { withRetry, delay, generateAIId, getErrorMessage } from "./utils";
+
+// ─── Configuration ───
+export { AI_CONFIG } from "./config";
+export type { AIProviderName, AIProviderCapability, AIProvider } from "./types/common";
+
+// ─── Types ───
+export type {
+  AIAnalysisResult,
+  AIMessage,
+  AISession,
+  AIResponse,
+  AIProviderConfig,
+  AIStreamResponse,
+  AIProviderError,
+} from "./types/common";
+
+export type {
+  TradeReviewResult,
+  TradePattern,
+  PerformanceMetrics,
+  RiskMetrics,
+  PsychologicalMetrics,
+  TradeQuality,
+} from "./types/trade-analysis";
+
+export type {
+  ChartAnalysisResult,
+  Pattern,
+  SupportResistance,
+  Trend,
+  CandlestickPattern,
+} from "./types/chart-analysis";
+
+export type {
+  OCRResult,
+  OCRTrade,
+  OCRConfidence,
+  OCRConfig,
+  SymbolMapping,
+} from "./types/ocr";
+
+export type {
+  CoachResponse,
+  CoachTopic,
+  CoachMilestone,
+  LearningPath,
+  SkillAssessment,
+} from "./types/coaching";
+
+export type {
+  TranscriptionResult,
+  TranscriptionSegment,
+  TranscriptionConfig,
+} from "./types/transcription";
