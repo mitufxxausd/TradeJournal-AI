@@ -16,6 +16,7 @@
  * - Workspace dashboard stats
  */
 
+import { useAuth } from "@/contexts/AuthContext";
 import { useState, useRef, useCallback, useEffect } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -334,9 +335,14 @@ function FieldStatus({ field }: { field: { field: string; value: unknown; confid
 
 export default function AIScreenshotAnalysis() {
   const { hasAccess } = useSubscription();
+  const { user } = useAuth();
+
   const ocr = useOCR();
   const history = useScreenshotHistory();
-  const trades = useTrades();
+
+  const trades = useTrades({
+    userId: user?.uid,
+  });
 
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [isDragging, setIsDragging] = useState(false);
