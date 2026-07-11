@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { useSpeechRecognition, isSpeechRecognitionSupported } from "@/hooks/use-speech-recognition";
-import { formatDuration } from "@/services/voice/voiceService";
+import { formatDuration, uploadVoiceNoteToCloudinary } from "@/services/voice/voiceService";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -51,12 +51,22 @@ interface VoiceNote {
 
 const STORAGE_KEY = "tradejournal_voice_notes";
 
+function isBlobUrl(url: string): boolean {
+  return url.startsWith("blob:");
+}
+
 function loadVoiceNotes(): VoiceNote[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return parsed.filter((note: VoiceNote) => note.id && note.name);
+      // Defensive: filter out any notes with blob URLs (they are broken after refresh)
+      // and any notes missing required fields
+      return parsed.filter((note: VoiceNote) => {
+        if (!note.id || !note.name) return false;
+        if (isBlobUrl(note.audioUrl)) return false;
+        return true;
+      });
     }
   } catch {
     // ignore - corrupted storage
@@ -66,7 +76,9 @@ function loadVoiceNotes(): VoiceNote[] {
 
 function saveVoiceNotes(notes: VoiceNote[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+    // Defensive: ensure no blob URLs are ever written to localStorage
+    const sanitized = notes.filter((note) => !isBlobUrl(note.audioUrl));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
   } catch {
     toast.error("Failed to save voice notes. Storage may be full.");
   }
@@ -82,8 +94,8 @@ function LockedFeature() {
       </div>
       <h3 className="mt-4 text-lg font-semibold">Voice Notes Locked</h3>
       <p className="mt-2 text-sm text-muted-foreground text-center max-w-sm">
-        Upgrade to <span className="font-semibold text-primary">Pro</span> or{" "}
-        <span className="font-semibold text-primary">Elite</span> to unlock Voice Notes with transcription.
+        Upgrade to <span className="font-semibold text-primary">Pro</span>{" "}
+        or <span className="font-semibold text-primary">Elite</span> to unlock Voice Notes with transcription.
       </p>
       <Button className="mt-6" asChild>
         <a href="#/ai/subscription">Upgrade Now</a>
@@ -127,6 +139,7 @@ export default function AIVoiceNotes() {
   const [editingTranscript, setEditingTranscript] = useState<string | null>(null);
   const [editTranscriptValue, setEditTranscriptValue] = useState("");
   const [isMediaSupported, setIsMediaSupported] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -202,23 +215,38 @@ export default function AIVoiceNotes() {
 
   // ─── Save Recording ───
 
-  const handleSaveRecording = useCallback(() => {
-    if (!recorder.audioUrl) return;
+  const handleSaveRecording = useCallback(async () => {
+    if (!recorder.audioUrl || !recorder.audioBlob) return;
 
-    const newNote: VoiceNote = {
-      id: `vn_${Date.now()}`,
-      name: `Recording ${voiceNotes.length + 1}`,
-      audioUrl: recorder.audioUrl,
-      duration: recorder.duration,
-      createdAt: new Date().toISOString(),
-      transcript: speech.transcript,
-      transcribed: speech.transcript.length > 0,
-    };
+    setIsUploading(true);
 
-    setVoiceNotes((prev) => [newNote, ...prev]);
-    recorder.reset();
-    speech.reset();
-    toast.success("Voice note saved");
+    try {
+      // Upload to Cloudinary to get a persistent HTTPS URL
+      const uploadResult = await uploadVoiceNoteToCloudinary(
+        recorder.audioBlob,
+        `voice_note_${Date.now()}.webm`
+      );
+
+      // Use the Cloudinary URL (never the blob URL)
+      const newNote: VoiceNote = {
+        id: `vn_${Date.now()}`,
+        name: `Recording ${voiceNotes.length + 1}`,
+        audioUrl: uploadResult.url, // Cloudinary HTTPS URL
+        duration: recorder.duration,
+        createdAt: new Date().toISOString(),
+        transcript: speech.transcript,
+        transcribed: speech.transcript.length > 0,
+      };
+
+      setVoiceNotes((prev) => [newNote, ...prev]);
+      recorder.reset();
+      speech.reset();
+      toast.success("Voice note saved");
+    } catch {
+      toast.error("Failed to upload voice note. Please try again.");
+    } finally {
+      setIsUploading(false);
+    }
   }, [recorder, speech, voiceNotes.length]);
 
   // ─── Playback ───
@@ -235,6 +263,7 @@ export default function AIVoiceNotes() {
         return;
       }
 
+      // Use the persisted Cloudinary URL (not a blob URL)
       const audio = new Audio(note.audioUrl);
       audioRef.current = audio;
 
@@ -306,10 +335,8 @@ export default function AIVoiceNotes() {
 
   const handleDelete = useCallback((id: string) => {
     try {
-      const note = voiceNotes.find((n) => n.id === id);
-      if (note?.audioUrl) {
-        URL.revokeObjectURL(note.audioUrl);
-      }
+      // Note: do NOT call URL.revokeObjectURL here — notes now use
+      // Cloudinary HTTPS URLs, not ephemeral blob URLs.
       setVoiceNotes((prev) => prev.filter((n) => n.id !== id));
       if (playingId === id) {
         setPlayingId(null);
@@ -322,7 +349,7 @@ export default function AIVoiceNotes() {
     } catch {
       toast.error("Failed to delete note");
     }
-  }, [voiceNotes, playingId]);
+  }, [playingId]);
 
   // ─── Rename ───
 
@@ -419,7 +446,7 @@ export default function AIVoiceNotes() {
             <h4 className="font-semibold text-sm text-green-700 dark:text-green-400">Real Voice Recording</h4>
             <p className="text-sm text-muted-foreground mt-1">
               Uses your browser&apos;s MediaRecorder API for audio capture and
-              Web Speech API for real-time transcription. All data stays local.
+              Web Speech API for real-time transcription. Audio is uploaded to Cloudinary for persistent storage.
             </p>
           </div>
         </div>
@@ -537,8 +564,13 @@ export default function AIVoiceNotes() {
                       size="lg"
                       className="h-12 w-12 rounded-full p-0"
                       onClick={handleSaveRecording}
+                      disabled={isUploading}
                     >
-                      <Check className="h-5 w-5" />
+                      {isUploading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Check className="h-5 w-5" />
+                      )}
                     </Button>
                     <Button
                       variant="ghost"
@@ -548,12 +580,20 @@ export default function AIVoiceNotes() {
                         recorder.reset();
                         speech.reset();
                       }}
+                      disabled={isUploading}
                     >
                       <RotateCcw className="h-5 w-5" />
                     </Button>
                   </>
                 )}
               </div>
+
+              {/* Uploading indicator */}
+              {isUploading && (
+                <p className="text-sm text-muted-foreground animate-pulse">
+                  Uploading to Cloudinary...
+                </p>
+              )}
 
               {/* Live Transcript during recording */}
               {showTranscriptPanel && (
