@@ -1,13 +1,15 @@
 /**
  * AI Screenshot Analysis Page
  * Phase 7C: AI Trade Extraction, Workspace History & Smart Journal Integration
+ * Phase 7D-1: Fixed screenshot persistence via Cloudinary, restored edit button, voice notes fix
  *
  * Workflow:
- *   Upload Screenshot → Image Quality Analysis → Enhanced OCR →
- *   Trade Extraction → AI Advice → Review → Import → Journal Integration
+ *   Upload Screenshot → Cloudinary Upload → Image Quality Analysis → Enhanced OCR →
+ *   Trade Extraction → AI Advice → Review/Edit → Import → Journal Integration
  *
  * Features:
- * - Persistent analysis history (survives page refresh)
+ - Persistent screenshot storage via Cloudinary (survives page refresh)
+ * - Editable extracted trade fields before import
  * - Smart image quality analysis with OCR accuracy prediction
  * - Enhanced multi-pass OCR with preprocessing
  * - AI trade advice based on extracted data and journal history
@@ -17,7 +19,7 @@
  */
 
 import { useAuth } from "@/contexts/AuthContext";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,8 +32,9 @@ import { useOCR } from "@/hooks/use-ocr";
 import { useScreenshotHistory } from "@/hooks/ai";
 import { useTrades } from "@/hooks/use-trades";
 import { analyzeImageQuality, generateTradeAdvice, ocrResultToExtractedTrade } from "@/services/ai";
+import { uploadToCloudinary, compressImage } from "@/services/cloudinaryService";
 import type { OCRResult } from "@/services/ocr";
-import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData } from "@/services/ai";
+import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData, FieldConfidenceDetail } from "@/services/ai";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -40,7 +43,7 @@ import {
   FileText, Eye, ChevronDown, ChevronUp, Check, Pencil,
   XCircle, Plus, ScanText, BarChart3, Info, Monitor, Brain,
   History, Gauge, Lightbulb, Copy, RotateCcw, ChevronLeft,
-  ThumbsUp, ThumbsDown,
+  ThumbsUp, ThumbsDown, Save,
 } from "lucide-react";
 
 // ─── Types ───
@@ -278,6 +281,15 @@ function HistoryPanel({ onSelectAnalysis, selectedId }: { onSelectAnalysis: (ana
                   )}
                 >
                   <div className="flex items-center gap-2">
+                    {/* Thumbnail */}
+                    <div className="h-8 w-8 rounded bg-muted overflow-hidden shrink-0">
+                      <img
+                        src={analysis.imageUrl || analysis.screenshotDataUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    </div>
                     {analysis.status === "imported" && <Check className="h-3 w-3 text-green-500 shrink-0" />}
                     {analysis.status === "needs_review" && <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />}
                     {analysis.status === "rejected" && <XCircle className="h-3 w-3 text-red-500 shrink-0" />}
@@ -285,7 +297,7 @@ function HistoryPanel({ onSelectAnalysis, selectedId }: { onSelectAnalysis: (ana
                     <span className="font-medium truncate">{analysis.extractedTrade?.symbol || analysis.fileName}</span>
                     <span className="text-muted-foreground ml-auto shrink-0">{new Date(analysis.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="flex items-center gap-1 mt-1 pl-10">
                     {analysis.extractedTrade?.direction && (
                       <Badge variant="outline" className={cn("text-[10px] h-4 px-1", analysis.extractedTrade.direction === "buy" ? "text-green-600" : "text-red-600")}>
                         {analysis.extractedTrade.direction.toUpperCase()}
@@ -331,6 +343,34 @@ function FieldStatus({ field }: { field: { field: string; value: unknown; confid
   );
 }
 
+// ─── Editable Field Row ───
+
+function EditableFieldRow({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string | number;
+  onChange: (val: string) => void;
+  type?: "text" | "number";
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm p-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20">
+      <Pencil className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+      <span className="text-muted-foreground text-xs shrink-0 w-20">{label}</span>
+      <Input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-7 text-xs ml-auto w-32 sm:w-40"
+        step={type === "number" ? "0.00001" : undefined}
+      />
+    </div>
+  );
+}
+
 // ─── Main Component ───
 
 export default function AIScreenshotAnalysis() {
@@ -350,9 +390,17 @@ export default function AIScreenshotAnalysis() {
   const [expandedText, setExpandedText] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(true);
   const [selectedAnalysis, setSelectedAnalysis] = useState<ScreenshotAnalysis | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTrade, setEditedTrade] = useState<Partial<ExtractedTradeData>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canAccess = hasAccess("aiScreenshotAnalysis");
+
+  // Get the best image URL for an analysis (Cloudinary > blob)
+  const getImageUrl = useCallback((analysis: ScreenshotAnalysis | null): string => {
+    if (!analysis) return "";
+    return analysis.imageUrl || analysis.screenshotDataUrl || "";
+  }, []);
 
   // ─── Drag & Drop ───
 
@@ -391,11 +439,12 @@ export default function AIScreenshotAnalysis() {
       if (img) URL.revokeObjectURL(img.preview);
       return prev.filter((i) => i.id !== id);
     });
-    if (selectedAnalysis?.screenshotDataUrl === images.find((i) => i.id === id)?.preview) setSelectedAnalysis(null);
+    const img = images.find((i) => i.id === id);
+    if (selectedAnalysis && img && getImageUrl(selectedAnalysis) === img.preview) setSelectedAnalysis(null);
     toast.info("Image removed");
   };
 
-  // ─── Analysis Pipeline ───
+  // ─── Analysis Pipeline with Cloudinary Upload ───
 
   const analyzeImage = async (id: string, file: File, preview: string) => {
     setImages((prev) => prev.map((i) => (i.id === id ? { ...i, status: "processing" } : i)));
@@ -418,11 +467,38 @@ export default function AIScreenshotAnalysis() {
 
       const status: ScreenshotAnalysis["status"] = result.trades.length > 0 ? "needs_review" : "error";
 
+      // Upload screenshot to Cloudinary for permanent storage
+      let imageUrl: string | null = null;
+      if (user?.uid) {
+        try {
+          const compressed = await compressImage(file);
+          const uploadResult = await uploadToCloudinary(
+            compressed,
+            file.name,
+            undefined,
+            { folder: `trade-journal/${user.uid}/screenshots`, tags: ["screenshot-analysis"] }
+          );
+          imageUrl = uploadResult.secure_url;
+        } catch (uploadErr) {
+          console.warn("Cloudinary upload failed, using local preview:", uploadErr);
+        }
+      }
+
       const saved = history.addAnalysis({
-        screenshotDataUrl: preview, ocrText: result.rawText || "", ocrResult: result,
-        extractedTrade, imageQuality: quality, aiAdvice,
-        status, reviewStatus: "pending", importStatus: "not_imported",
-        journalTradeId: null, processingTimeMs, fileName: file.name, fileSize: file.size,
+        screenshotDataUrl: preview,
+        imageUrl,
+        ocrText: result.rawText || "",
+        ocrResult: result,
+        extractedTrade,
+        imageQuality: quality,
+        aiAdvice,
+        status,
+        reviewStatus: "pending",
+        importStatus: "not_imported",
+        journalTradeId: null,
+        processingTimeMs,
+        fileName: file.name,
+        fileSize: file.size,
         error: result.error || undefined,
       });
 
@@ -441,11 +517,38 @@ export default function AIScreenshotAnalysis() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analysis failed";
       setImages((prev) => prev.map((i) => (i.id === id ? { ...i, status: "error" } : i)));
+
+      // Try Cloudinary upload even on OCR failure so the image is preserved
+      let imageUrl: string | null = null;
+      if (user?.uid) {
+        try {
+          const compressed = await compressImage(file);
+          const uploadResult = await uploadToCloudinary(
+            compressed,
+            file.name,
+            undefined,
+            { folder: `trade-journal/${user.uid}/screenshots`, tags: ["screenshot-analysis"] }
+          );
+          imageUrl = uploadResult.secure_url;
+        } catch { /* ignore upload error */ }
+      }
+
       history.addAnalysis({
-        screenshotDataUrl: preview, ocrText: "", ocrResult: null, extractedTrade: null,
-        imageQuality: null, aiAdvice: null, status: "error", reviewStatus: "pending",
-        importStatus: "not_imported", journalTradeId: null, processingTimeMs: Date.now() - startTime,
-        fileName: file.name, fileSize: file.size, error: message,
+        screenshotDataUrl: preview,
+        imageUrl,
+        ocrText: "",
+        ocrResult: null,
+        extractedTrade: null,
+        imageQuality: null,
+        aiAdvice: null,
+        status: "error",
+        reviewStatus: "pending",
+        importStatus: "not_imported",
+        journalTradeId: null,
+        processingTimeMs: Date.now() - startTime,
+        fileName: file.name,
+        fileSize: file.size,
+        error: message,
       });
       toast.error(message);
     }
@@ -453,11 +556,13 @@ export default function AIScreenshotAnalysis() {
 
   const handleSelectAnalysis = useCallback((analysis: ScreenshotAnalysis) => {
     setSelectedAnalysis(analysis);
+    setIsEditing(false);
+    setEditedTrade({});
   }, []);
 
   const handleImportTrade = (analysis: ScreenshotAnalysis) => {
     if (!analysis.extractedTrade) { toast.error("No trade data to import"); return; }
-    const trade = analysis.extractedTrade;
+    const trade = isEditing && editedTrade ? { ...analysis.extractedTrade, ...editedTrade } : analysis.extractedTrade;
     const params = new URLSearchParams();
     if (trade.symbol) params.set("pair", trade.symbol);
     if (trade.direction && trade.direction !== "unknown") params.set("direction", trade.direction.toUpperCase());
@@ -483,6 +588,54 @@ export default function AIScreenshotAnalysis() {
     if (duplicated) toast.success("Analysis duplicated");
   };
 
+  // ─── Edit Mode ───
+
+  const handleStartEdit = useCallback(() => {
+    if (!selectedAnalysis?.extractedTrade) return;
+    setEditedTrade({ ...selectedAnalysis.extractedTrade });
+    setIsEditing(true);
+  }, [selectedAnalysis]);
+
+  const handleSaveEdit = useCallback(() => {
+    if (!selectedAnalysis) return;
+    const updatedTrade: ExtractedTradeData = {
+      ...selectedAnalysis.extractedTrade!,
+      ...editedTrade,
+    };
+    // Update field confidences to reflect user edits
+    const updatedConfidences = updatedTrade.fieldConfidences.map((fc) => {
+      const fieldKey = fc.field.toLowerCase().replace(/\s+/g, "");
+      let newVal: unknown = fc.value;
+      if (fieldKey === "symbol" || fieldKey === "pair") newVal = updatedTrade.symbol;
+      else if (fieldKey === "direction") newVal = updatedTrade.direction;
+      else if (fieldKey === "entryprice" || fieldKey === "entry") newVal = updatedTrade.entryPrice;
+      else if (fieldKey === "stoploss" || fieldKey === "sl") newVal = updatedTrade.stopLoss;
+      else if (fieldKey === "takeprofit" || fieldKey === "tp") newVal = updatedTrade.takeProfit;
+      else if (fieldKey === "lotsize" || fieldKey === "position size") newVal = updatedTrade.lotSize;
+      return {
+        ...fc,
+        value: newVal,
+        status: newVal !== null && newVal !== "" && newVal !== undefined ? "detected" as const : fc.status,
+      };
+    });
+    updatedTrade.fieldConfidences = updatedConfidences;
+
+    history.updateAnalysis(selectedAnalysis.id, {
+      extractedTrade: updatedTrade,
+      reviewStatus: "edited",
+    });
+    setSelectedAnalysis((prev) =>
+      prev ? { ...prev, extractedTrade: updatedTrade, reviewStatus: "edited" } : null
+    );
+    setIsEditing(false);
+    toast.success("Trade data updated");
+  }, [selectedAnalysis, editedTrade, history]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditedTrade({});
+  }, []);
+
   // ─── Render ───
 
   if (!canAccess) {
@@ -503,6 +656,7 @@ export default function AIScreenshotAnalysis() {
   }
 
   const displayAnalysis = selectedAnalysis;
+  const displayImageUrl = getImageUrl(displayAnalysis);
 
   return (
     <AppLayout>
@@ -575,9 +729,20 @@ export default function AIScreenshotAnalysis() {
                   <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,400px)_1fr]">
                     {/* Image */}
                     <div className="relative group bg-muted">
-                      <img src={displayAnalysis.screenshotDataUrl} alt="Screenshot" className="h-56 lg:h-full w-full object-cover cursor-pointer" onClick={() => setFullscreenImage(displayAnalysis.screenshotDataUrl)} />
+                      <img
+                        src={displayImageUrl}
+                        alt="Screenshot"
+                        className="h-56 lg:h-full w-full object-cover cursor-pointer"
+                        onClick={() => setFullscreenImage(displayImageUrl)}
+                        onError={(e) => {
+                          // If Cloudinary URL fails, try the blob URL as fallback
+                          if (displayAnalysis.imageUrl && displayAnalysis.screenshotDataUrl) {
+                            (e.target as HTMLImageElement).src = displayAnalysis.screenshotDataUrl;
+                          }
+                        }}
+                      />
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                        <Button variant="secondary" size="icon" className="h-9 w-9" onClick={() => setFullscreenImage(displayAnalysis.screenshotDataUrl)}>
+                        <Button variant="secondary" size="icon" className="h-9 w-9" onClick={() => setFullscreenImage(displayImageUrl)}>
                           <Maximize2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -603,6 +768,12 @@ export default function AIScreenshotAnalysis() {
                         )}>
                           {displayAnalysis.status === "imported" ? "Imported" : displayAnalysis.status === "needs_review" ? "Needs Review" : displayAnalysis.status === "error" ? "Error" : displayAnalysis.status}
                         </Badge>
+                        {displayAnalysis.reviewStatus === "edited" && (
+                          <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-300">
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Edited
+                          </Badge>
+                        )}
                         <span className="text-xs text-muted-foreground ml-auto">{displayAnalysis.processingTimeMs}ms</span>
                       </div>
 
@@ -621,18 +792,78 @@ export default function AIScreenshotAnalysis() {
                         </div>
                       )}
 
-                      {/* Extracted Fields */}
+                      {/* Extracted Fields - View or Edit Mode */}
                       {displayAnalysis.extractedTrade?.fieldConfidences && (
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 mb-2">
-                            <ScanText className="h-3 w-3" />
-                            Extracted Fields
-                          </p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {displayAnalysis.extractedTrade.fieldConfidences.map((field) => (
-                              <FieldStatus key={field.field} field={field} />
-                            ))}
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                              <ScanText className="h-3 w-3" />
+                              Extracted Fields
+                            </p>
+                            {!isEditing && displayAnalysis.extractedTrade && (
+                              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={handleStartEdit}>
+                                <Pencil className="h-3 w-3" />
+                                Edit
+                              </Button>
+                            )}
                           </div>
+
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <EditableFieldRow
+                                  label="Symbol"
+                                  value={editedTrade.symbol || ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, symbol: v }))}
+                                />
+                                <EditableFieldRow
+                                  label="Direction"
+                                  value={editedTrade.direction || ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, direction: v as "buy" | "sell" | "" | "unknown" }))}
+                                />
+                                <EditableFieldRow
+                                  label="Entry Price"
+                                  value={editedTrade.entryPrice ?? ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, entryPrice: v ? parseFloat(v) : null }))}
+                                  type="number"
+                                />
+                                <EditableFieldRow
+                                  label="Stop Loss"
+                                  value={editedTrade.stopLoss ?? ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, stopLoss: v ? parseFloat(v) : null }))}
+                                  type="number"
+                                />
+                                <EditableFieldRow
+                                  label="Take Profit"
+                                  value={editedTrade.takeProfit ?? ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, takeProfit: v ? parseFloat(v) : null }))}
+                                  type="number"
+                                />
+                                <EditableFieldRow
+                                  label="Lot Size"
+                                  value={editedTrade.lotSize ?? ""}
+                                  onChange={(v) => setEditedTrade((prev) => ({ ...prev, lotSize: v ? parseFloat(v) : null }))}
+                                  type="number"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2 pt-2">
+                                <Button size="sm" className="gap-1" onClick={handleSaveEdit}>
+                                  <Save className="h-4 w-4" />
+                                  Save Changes
+                                </Button>
+                                <Button size="sm" variant="outline" className="gap-1" onClick={handleCancelEdit}>
+                                  <X className="h-4 w-4" />
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {displayAnalysis.extractedTrade.fieldConfidences.map((field) => (
+                                <FieldStatus key={field.field} field={field} />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
