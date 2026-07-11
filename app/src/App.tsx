@@ -10,7 +10,7 @@ import AddTrade from "@/pages/AddTrade";
 import TradeDetail from "@/pages/TradeDetail";
 import Journal from "@/pages/journal";
 import Analytics from "@/pages/analytics";
-import Settings from "@/pages/settings";
+import { SettingsPage as Settings } from "@/pages/settings-page";
 
 // AI Workspace Pages - lazy loaded
 const AIDashboard = lazy(() => import("@/pages/ai/ai-dashboard"));

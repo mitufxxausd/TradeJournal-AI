@@ -1,45 +1,51 @@
 /**
  * AI Screenshot Analysis Page
- * Phase 7C: AI Trade Extraction, Workspace History & Smart Journal Integration
+ * Phase 7D-1: AI Extraction + Cloudinary Integration
  *
  * Workflow:
- *   Upload Screenshot → Image Quality Analysis → Enhanced OCR →
- *   Trade Extraction → AI Advice → Review → Import → Journal Integration
+ *   Upload Screenshot -> Cloudinary Upload -> Image Quality Analysis ->
+ *   Enhanced OCR -> AI Extraction -> Structured Trade Data ->
+ *   AI Advice -> Review -> Import -> Journal Integration
  *
  * Features:
- * - Persistent analysis history (survives page refresh)
- * - Smart image quality analysis with OCR accuracy prediction
- * - Enhanced multi-pass OCR with preprocessing
- * - AI trade advice based on extracted data and journal history
+ * - Cloudinary image hosting with secure URLs
+ * - AI-powered trade extraction (not just regex)
+ * - Dual confidence scoring (OCR + AI)
+ * - Enhanced AI advice with risk, RR, mistakes, suggestions, quality
+ * - Persistent analysis history with image URLs
  * - Color-coded review UI (green/yellow/red)
- * - Automatic journal integration
- * - Workspace dashboard stats
+ * - Better loading states for each pipeline phase
+ * - Graceful error handling for each stage
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useOCR } from "@/hooks/use-ocr";
 import { useScreenshotHistory } from "@/hooks/ai";
 import { useTrades } from "@/hooks/use-trades";
-import { analyzeImageQuality, generateTradeAdvice, ocrResultToExtractedTrade } from "@/services/ai";
-import type { OCRResult } from "@/services/ocr";
+import {
+  analyzeImageQuality,
+  generateTradeAdvice,
+  ocrResultToExtractedTrade,
+  aiTradeToExtractedTrade,
+  aiAdviceToTradeAdvice,
+} from "@/services/ai";
 import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData } from "@/services/ai";
+import type { AIExtractionResult } from "@/services/ai/types/ai-extraction";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Camera, Upload, X, Maximize2, Trash2, Loader2, Lock,
   TrendingUp, TrendingDown, Minus, Sparkles, AlertTriangle,
-  FileText, Eye, ChevronDown, ChevronUp, Check, Pencil,
-  XCircle, Plus, ScanText, BarChart3, Info, Monitor, Brain,
-  History, Gauge, Lightbulb, Copy, RotateCcw, ChevronLeft,
-  ThumbsUp, ThumbsDown,
+  FileText, ChevronDown, ChevronUp, Check,
+  XCircle, Plus, ScanText, BarChart3, Info, Brain,
+  History, Gauge, Lightbulb, Copy, ChevronLeft,
+  ThumbsUp, Cloud, CloudOff, Shield,
 } from "lucide-react";
 
 // ─── Types ───
@@ -63,11 +69,48 @@ function LockedFeature() {
       <h3 className="mt-4 text-lg font-semibold">Screenshot Analysis Locked</h3>
       <p className="mt-2 text-sm text-muted-foreground text-center max-w-sm">
         Upgrade to <span className="font-semibold text-primary">Pro</span> or{" "}
-        <span className="font-semibold text-primary">Elite</span> to unlock OCR-powered screenshot analysis with trade extraction.
+        <span className="font-semibold text-primary">Elite</span> to unlock AI-powered screenshot analysis with trade extraction.
       </p>
       <Button className="mt-6" asChild>
         <a href="#/ai/subscription">Upgrade Now</a>
       </Button>
+    </div>
+  );
+}
+
+// ─── Confidence Display ───
+
+function ConfidenceDisplay({ ocr, ai, overall }: { ocr: number; ai: number; overall: number }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+        <Shield className="h-4 w-4 text-primary shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] text-muted-foreground">Overall Confidence</p>
+          <div className="flex items-center gap-2">
+            <Progress value={overall} className="h-1.5 flex-1" />
+            <span className={cn("text-xs font-bold shrink-0", overall >= 80 ? "text-green-500" : overall >= 60 ? "text-amber-500" : "text-red-500")}>
+              {overall}%
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2 rounded bg-muted/30">
+          <p className="text-[10px] text-muted-foreground">OCR Confidence</p>
+          <div className="flex items-center gap-1.5">
+            <div className={cn("w-2 h-2 rounded-full shrink-0", ocr >= 80 ? "bg-green-500" : ocr >= 60 ? "bg-amber-500" : "bg-red-500")} />
+            <span className="text-xs font-medium">{ocr}%</span>
+          </div>
+        </div>
+        <div className="p-2 rounded bg-muted/30">
+          <p className="text-[10px] text-muted-foreground">AI Confidence</p>
+          <div className="flex items-center gap-1.5">
+            <div className={cn("w-2 h-2 rounded-full shrink-0", ai >= 80 ? "bg-green-500" : ai >= 60 ? "bg-amber-500" : "bg-red-500")} />
+            <span className="text-xs font-medium">{ai}%</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -144,7 +187,7 @@ function QualityMetricItem({ label, value, sublabel }: { label: string; value: n
 
 // ─── AI Trade Advice Display ───
 
-function TradeAdviceDisplay({ advice, symbol }: { advice: TradeAdvice; symbol?: string }) {
+function TradeAdviceDisplay({ advice }: { advice: TradeAdvice; symbol?: string }) {
   return (
     <div className="space-y-3">
       {advice.riskReward !== null && (
@@ -223,6 +266,29 @@ function TradeAdviceDisplay({ advice, symbol }: { advice: TradeAdvice; symbol?: 
   );
 }
 
+// ─── Cloudinary Status Display ───
+
+function CloudinaryStatus({ imageUrl }: { imageUrl: string | null }) {
+  if (imageUrl) {
+    return (
+      <div className="flex items-center gap-2 p-2 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20">
+        <Cloud className="h-4 w-4 text-green-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-green-700 dark:text-green-300">Cloudinary Uploaded</p>
+          <p className="text-[10px] text-green-600 dark:text-green-400 truncate">{imageUrl}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 p-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20">
+      <CloudOff className="h-4 w-4 text-amber-500 shrink-0" />
+      <p className="text-xs text-amber-700 dark:text-amber-300">Not uploaded to Cloudinary</p>
+    </div>
+  );
+}
+
 // ─── History Panel ───
 
 function HistoryPanel({ onSelectAnalysis, selectedId }: { onSelectAnalysis: (analysis: ScreenshotAnalysis) => void; selectedId: string | null }) {
@@ -290,6 +356,14 @@ function HistoryPanel({ onSelectAnalysis, selectedId }: { onSelectAnalysis: (ana
                         {analysis.extractedTrade.direction.toUpperCase()}
                       </Badge>
                     )}
+                    {analysis.aiExtraction && (
+                      <Badge variant="outline" className={cn("text-[10px] h-4 px-1",
+                        analysis.aiExtraction.overallConfidence >= 80 ? "text-green-600" :
+                        analysis.aiExtraction.overallConfidence >= 60 ? "text-amber-600" : "text-red-600"
+                      )}>
+                        AI: {analysis.aiExtraction.overallConfidence}%
+                      </Badge>
+                    )}
                     {analysis.importStatus === "imported" && <Badge className="text-[10px] h-4 px-1 bg-green-500 text-white">Imported</Badge>}
                     {analysis.importStatus === "not_imported" && analysis.status === "confirmed" && (
                       <Badge variant="outline" className="text-[10px] h-4 px-1 text-amber-600">Needs Review</Badge>
@@ -330,13 +404,42 @@ function FieldStatus({ field }: { field: { field: string; value: unknown; confid
   );
 }
 
+// ─── Processing Status Badge ───
+
+function ProcessingStatus({ status }: { status: import("@/hooks/use-ocr").OCRStatus }) {
+  const icons = {
+    idle: null,
+    uploading: <Cloud className="h-3.5 w-3.5 animate-pulse" />,
+    ocr: <ScanText className="h-3.5 w-3.5 animate-pulse" />,
+    ai_extracting: <Brain className="h-3.5 w-3.5 animate-pulse" />,
+    completed: <Check className="h-3.5 w-3.5 text-green-500" />,
+    error: <XCircle className="h-3.5 w-3.5 text-red-500" />,
+  };
+
+  const labels = {
+    idle: "",
+    uploading: "Uploading...",
+    ocr: "Reading text...",
+    ai_extracting: "AI analyzing...",
+    completed: "Complete",
+    error: "Error",
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {icons[status.phase]}
+      <span>{labels[status.phase]}</span>
+    </div>
+  );
+}
+
 // ─── Main Component ───
 
 export default function AIScreenshotAnalysis() {
   const { hasAccess } = useSubscription();
   const ocr = useOCR();
   const history = useScreenshotHistory();
-  const trades = useTrades();
+  const trades = useTrades({ userId: undefined });
 
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -399,35 +502,78 @@ export default function AIScreenshotAnalysis() {
       let quality: ImageQualityMetrics | null = null;
       try { quality = await analyzeImageQuality(file); } catch { /* non-critical */ }
 
-      const result = await ocr.run(file, { imageQuality: "high" });
-      if (!result) throw new Error("OCR processing failed");
+      // Run the enhanced pipeline: Cloudinary -> OCR -> AI Extraction
+      const enhancedResult = await ocr.run(file, { imageQuality: "high" });
+
+      if (!enhancedResult) {
+        throw new Error(ocr.error || "Analysis pipeline failed");
+      }
 
       const processingTimeMs = Date.now() - startTime;
-      const extractedTrade = result.trades.length > 0 ? ocrResultToExtractedTrade(result) : null;
 
+      // Extract trade data - prefer AI extraction, fallback to OCR
+      let extractedTrade: ExtractedTradeData | null = null;
       let aiAdvice: TradeAdvice | null = null;
-      if (extractedTrade) {
+      let aiExtractionData: AIExtractionResult | null = null;
+
+      if (enhancedResult.aiExtraction) {
+        aiExtractionData = enhancedResult.aiExtraction;
+        // Convert AI trade to legacy format
+        extractedTrade = aiTradeToExtractedTrade(enhancedResult.aiExtraction.trade);
+        // Convert AI advice to legacy format
+        aiAdvice = aiAdviceToTradeAdvice(enhancedResult.aiExtraction.advice);
+      } else if (enhancedResult.ocrResult.trades.length > 0) {
+        // Fallback to OCR-only extraction
+        extractedTrade = ocrResultToExtractedTrade(enhancedResult.ocrResult);
         try { aiAdvice = generateTradeAdvice(extractedTrade, trades.trades); } catch { /* non-critical */ }
       }
 
-      const status: ScreenshotAnalysis["status"] = result.trades.length > 0 ? "needs_review" : "error";
+      // Generate journal-based advice if we have trade data
+      if (extractedTrade && !aiAdvice) {
+        try { aiAdvice = generateTradeAdvice(extractedTrade, trades.trades); } catch { /* non-critical */ }
+      }
+
+      const status: ScreenshotAnalysis["status"] = extractedTrade ? "needs_review" : "error";
+
+      // Build confidence data
+      const aiExtractionConfidence = aiExtractionData
+        ? {
+            ocrConfidence: aiExtractionData.confidence.ocr,
+            aiConfidence: aiExtractionData.confidence.ai,
+            overallConfidence: aiExtractionData.confidence.overall,
+          }
+        : null;
 
       const saved = history.addAnalysis({
-        screenshotDataUrl: preview, ocrText: result.rawText || "", ocrResult: result,
-        extractedTrade, imageQuality: quality, aiAdvice,
-        status, reviewStatus: "pending", importStatus: "not_imported",
-        journalTradeId: null, processingTimeMs, fileName: file.name, fileSize: file.size,
-        error: result.error || undefined,
+        screenshotDataUrl: preview,
+        imageUrl: enhancedResult.imageUrl,
+        ocrText: enhancedResult.ocrResult.rawText || "",
+        ocrResult: enhancedResult.ocrResult,
+        extractedTrade,
+        aiExtraction: aiExtractionConfidence,
+        imageQuality: quality,
+        aiAdvice,
+        status,
+        reviewStatus: "pending",
+        importStatus: "not_imported",
+        journalTradeId: null,
+        processingTimeMs,
+        fileName: file.name,
+        fileSize: file.size,
+        error: enhancedResult.ocrResult.error || undefined,
       });
 
       setImages((prev) => prev.map((i) => (i.id === id ? { ...i, status: "completed", analysisId: saved.id } : i)));
 
-      if (result.trades.length > 0) {
-        const confLevel = result.confidenceLevel;
-        if (confLevel === "low") toast.warning(`${result.trades.length} trade(s) detected. Please review before importing.`);
-        else if (confLevel === "medium") toast.info(`${result.trades.length} trade(s) detected. Review recommended.`);
-        else toast.success(`${result.trades.length} trade(s) detected with high confidence.`);
-      } else if (result.rawText) {
+      // Toast notification
+      if (aiExtractionData) {
+        const conf = aiExtractionData.confidence.overall;
+        if (conf >= 80) toast.success(`AI extracted trade with ${conf}% confidence`);
+        else if (conf >= 60) toast.info(`AI extracted trade with ${conf}% confidence. Review recommended.`);
+        else toast.warning(`Low confidence (${conf}%). Please verify all fields.`);
+      } else if (extractedTrade) {
+        toast.info("Trade extracted via OCR. AI extraction unavailable.");
+      } else if (enhancedResult.ocrResult.rawText) {
         toast.info("Text detected but no trade data found. Try a clearer screenshot.");
       } else {
         toast.warning("No text detected in image.");
@@ -436,10 +582,22 @@ export default function AIScreenshotAnalysis() {
       const message = err instanceof Error ? err.message : "Analysis failed";
       setImages((prev) => prev.map((i) => (i.id === id ? { ...i, status: "error" } : i)));
       history.addAnalysis({
-        screenshotDataUrl: preview, ocrText: "", ocrResult: null, extractedTrade: null,
-        imageQuality: null, aiAdvice: null, status: "error", reviewStatus: "pending",
-        importStatus: "not_imported", journalTradeId: null, processingTimeMs: Date.now() - startTime,
-        fileName: file.name, fileSize: file.size, error: message,
+        screenshotDataUrl: preview,
+        imageUrl: null,
+        ocrText: "",
+        ocrResult: null,
+        extractedTrade: null,
+        aiExtraction: null,
+        imageQuality: null,
+        aiAdvice: null,
+        status: "error",
+        reviewStatus: "pending",
+        importStatus: "not_imported",
+        journalTradeId: null,
+        processingTimeMs: Date.now() - startTime,
+        fileName: file.name,
+        fileSize: file.size,
+        error: message,
       });
       toast.error(message);
     }
@@ -488,7 +646,7 @@ export default function AIScreenshotAnalysis() {
               <Camera className="h-6 w-6 sm:h-7 sm:w-7 text-primary" />
               Screenshot Analysis
             </h1>
-            <p className="mt-1 text-muted-foreground">Analyze trading screenshots with OCR</p>
+            <p className="mt-1 text-muted-foreground">Analyze trading screenshots with AI</p>
           </div>
           <LockedFeature />
         </div>
@@ -509,7 +667,7 @@ export default function AIScreenshotAnalysis() {
               Screenshot Analysis
             </h1>
             <p className="mt-1 text-muted-foreground text-sm sm:text-base">
-              Upload trading screenshots for AI-powered trade extraction
+              Upload trading screenshots for AI-powered trade extraction with Cloudinary hosting
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -527,10 +685,10 @@ export default function AIScreenshotAnalysis() {
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 sm:p-4 flex items-start gap-3">
               <Sparkles className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
               <div className="min-w-0">
-                <h4 className="font-semibold text-sm text-blue-700 dark:text-blue-400">Enhanced AI Trade Extraction</h4>
+                <h4 className="font-semibold text-sm text-blue-700 dark:text-blue-400">AI-Powered Trade Extraction</h4>
                 <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                  Upload a screenshot and our AI will extract trade details, analyze image quality,
-                  provide trading advice, and save everything to your history.
+                  Upload a screenshot and our AI will extract trade details, upload to Cloudinary,
+                  analyze image quality, provide trading advice, and save everything to your history.
                 </p>
               </div>
             </div>
@@ -553,7 +711,7 @@ export default function AIScreenshotAnalysis() {
                   <Upload className="h-5 w-5 sm:h-6 sm:w-6" />
                 </div>
                 <h3 className="mt-3 sm:mt-4 font-semibold text-sm sm:text-base">{isDragging ? "Drop images here" : "Drag & drop screenshots here"}</h3>
-                <p className="mt-1 text-xs sm:text-sm text-muted-foreground">or click to browse · PNG, JPG, WEBP · MT4, MT5, TradingView</p>
+                <p className="mt-1 text-xs sm:text-sm text-muted-foreground">or click to browse - PNG, JPG, WEBP - MT4, MT5, TradingView</p>
               </div>
             )}
 
@@ -569,7 +727,12 @@ export default function AIScreenshotAnalysis() {
                   <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,400px)_1fr]">
                     {/* Image */}
                     <div className="relative group bg-muted">
-                      <img src={displayAnalysis.screenshotDataUrl} alt="Screenshot" className="h-56 lg:h-full w-full object-cover cursor-pointer" onClick={() => setFullscreenImage(displayAnalysis.screenshotDataUrl)} />
+                      <img
+                        src={displayAnalysis.screenshotDataUrl}
+                        alt="Screenshot"
+                        className="h-56 lg:h-full w-full object-cover cursor-pointer"
+                        onClick={() => setFullscreenImage(displayAnalysis.screenshotDataUrl)}
+                      />
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                         <Button variant="secondary" size="icon" className="h-9 w-9" onClick={() => setFullscreenImage(displayAnalysis.screenshotDataUrl)}>
                           <Maximize2 className="h-4 w-4" />
@@ -599,6 +762,30 @@ export default function AIScreenshotAnalysis() {
                         </Badge>
                         <span className="text-xs text-muted-foreground ml-auto">{displayAnalysis.processingTimeMs}ms</span>
                       </div>
+
+                      {/* Cloudinary Status */}
+                      <CloudinaryStatus imageUrl={displayAnalysis.imageUrl} />
+
+                      {/* AI Confidence Scores */}
+                      {displayAnalysis.aiExtraction && (
+                        <div>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors mb-2"
+                            onClick={() => setExpandedText(expandedText === "confidence" ? null : "confidence")}
+                          >
+                            <Shield className="h-3 w-3" />
+                            Confidence Scores
+                            {expandedText === "confidence" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          </button>
+                          {expandedText === "confidence" && (
+                            <ConfidenceDisplay
+                              ocr={displayAnalysis.aiExtraction.ocrConfidence}
+                              ai={displayAnalysis.aiExtraction.aiConfidence}
+                              overall={displayAnalysis.aiExtraction.overallConfidence}
+                            />
+                          )}
+                        </div>
+                      )}
 
                       {/* Image Quality */}
                       {displayAnalysis.imageQuality && (
@@ -642,7 +829,7 @@ export default function AIScreenshotAnalysis() {
                             {expandedText === "advice" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                           </button>
                           {expandedText === "advice" && (
-                            <TradeAdviceDisplay advice={displayAnalysis.aiAdvice} symbol={displayAnalysis.extractedTrade?.symbol} />
+                            <TradeAdviceDisplay advice={displayAnalysis.aiAdvice} />
                           )}
                         </div>
                       )}
@@ -692,7 +879,7 @@ export default function AIScreenshotAnalysis() {
               </div>
             )}
 
-            {/* Uploading Images */}
+            {/* Processing Images */}
             {images.filter((i) => i.status === "processing").length > 0 && (
               <div className="space-y-3">
                 <h2 className="text-sm font-semibold text-muted-foreground">Processing</h2>
@@ -707,7 +894,7 @@ export default function AIScreenshotAnalysis() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{image.file.name}</p>
-                        <p className="text-xs text-muted-foreground">Analyzing image quality and running OCR...</p>
+                        <ProcessingStatus status={ocr.status} />
                         <Progress value={ocr.progress} className="h-1.5 mt-2" />
                       </div>
                     </div>
@@ -745,7 +932,7 @@ export default function AIScreenshotAnalysis() {
                 </div>
                 <h3 className="text-lg font-semibold">No Screenshots Yet</h3>
                 <p className="mt-2 text-sm text-muted-foreground max-w-sm">
-                  Upload a trading screenshot to extract trade data using our enhanced OCR pipeline.
+                  Upload a trading screenshot to extract trade data using our AI-powered pipeline.
                   Supports MT4, MT5, TradingView, and other platforms.
                 </p>
               </div>

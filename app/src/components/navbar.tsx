@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { useThemeContext } from "@/components/theme-provider"
+import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/hooks/use-auth"
 
 interface NavbarProps {
@@ -19,7 +19,7 @@ interface NavbarProps {
 }
 
 export function Navbar({ sidebarCollapsed }: NavbarProps) {
-  const { toggleTheme, theme } = useThemeContext()
+  const { setTheme, theme } = useTheme()
   const { user, logout } = useAuth()
 
   return (
@@ -41,7 +41,7 @@ export function Navbar({ sidebarCollapsed }: NavbarProps) {
           variant="ghost"
           size="icon"
           className="h-9 w-9"
-          onClick={toggleTheme}
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? (
             <Sun className="h-4 w-4" />

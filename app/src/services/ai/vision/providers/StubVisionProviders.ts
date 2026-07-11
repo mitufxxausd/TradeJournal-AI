@@ -1,42 +1,24 @@
 /**
- * Stub Vision Providers
- * Placeholder implementations for real AI Vision providers.
+ * Stub Vision Provider Implementations
  *
- * These stubs:
- * - Return isAvailable() === false (no accidental API usage)
- * - Throw descriptive errors when called
- * - Are ready for real implementation when API keys are configured
- * - Follow the same VisionProvider interface as all other providers
- *
- * To activate a provider:
- * 1. Set the corresponding environment variable (API key)
- * 2. Implement the actual API calls in the provider class
- * 3. Update isAvailable() to check for the API key
- *
- * Supported providers:
- * - OpenAI (GPT-4V, GPT-4o)
- * - Google Gemini (Gemini Pro Vision)
- * - Anthropic Claude (Claude 3 Opus/Sonnet)
- * - OpenRouter (unified API for multiple models)
+ * Placeholder implementations for vision providers that are not yet fully implemented.
+ * These stubs maintain the provider registry structure while the actual implementations
+ * are being developed.
  */
 
-import type { VisionProvider, VisionProviderConfig } from "../VisionProvider";
 import type {
-  VisionAnalysisResult,
-  VisionRequestOptions,
-  VisionBatchResult,
+  VisionProvider,
+  VisionProviderConfig,
   VisionFeatureFlags,
-} from "../VisionAnalysisResult";
-import { DEFAULT_VISION_FEATURE_FLAGS } from "../VisionAnalysisResult";
+} from "../types/VisionProvider";
+import { DEFAULT_VISION_FEATURE_FLAGS } from "../types/VisionProvider";
 
-// ─── Base Stub Class ───
-
-abstract class StubVisionProvider implements VisionProvider {
-  abstract readonly name: string;
+/**
+ * Base stub class with common functionality
+ */
+abstract class BaseStubVisionProvider implements VisionProvider {
   abstract readonly providerId: string;
-  readonly version = "0.0.0-stub";
-
-  abstract readonly supportedFeatures: VisionFeatureFlags;
+  abstract readonly name: string;
 
   protected config: VisionProviderConfig;
 
@@ -49,8 +31,6 @@ abstract class StubVisionProvider implements VisionProvider {
       timeoutMs: 30000,
       features: { ...DEFAULT_VISION_FEATURE_FLAGS },
       ...config,
-      providerId: this.providerId,
-      name: this.name,
     };
   }
 
@@ -58,166 +38,124 @@ abstract class StubVisionProvider implements VisionProvider {
    * Stubs are never available until properly implemented.
    * Override this in the actual implementation.
    */
-  isAvailable(): boolean {
+  async isAvailable(): Promise<boolean> {
     return false;
   }
 
   /**
-   * Throws an error directing the user to configure the provider.
-   * Override this in the actual implementation with real API calls.
+   * Stub analyze - throws error directing to use the actual implementation
    */
-  async analyze(_imageFile: File, _options?: VisionRequestOptions): Promise<VisionAnalysisResult> {
+  async analyze(_imageData: string | Buffer): Promise<{
+    text: string;
+    confidence: number;
+    boundingBoxes?: Array<{
+      text: string;
+      confidence: number;
+      bbox: [number, number, number, number];
+    }>;
+  }> {
     throw new Error(
-      `${this.name} is not configured. ` +
-      `Set ${this.getApiKeyEnvVar()} environment variable and implement the provider. ` +
-      `See AI_VISION_ARCHITECTURE.md for setup instructions.`
+      `${this.name} vision provider is not yet implemented. ` +
+        "Please use the OCR pipeline instead for text extraction."
     );
   }
 
-  async analyzeBatch(_imageFiles: File[], _options?: VisionRequestOptions): Promise<VisionBatchResult> {
-    throw new Error(`${this.name} batch analysis not implemented. Configure the provider first.`);
+  /**
+   * Get current configuration
+   */
+  getConfig(): VisionProviderConfig {
+    return { ...this.config };
   }
 
   /**
-   * Returns unhealthy status since this is a stub.
+   * Get supported features (all disabled for stubs)
    */
-  async healthCheck(): Promise<{ healthy: boolean; latencyMs: number; message: string }> {
+  getSupportedFeatures(): VisionFeatureFlags {
+    return { ...DEFAULT_VISION_FEATURE_FLAGS };
+  }
+
+  /**
+   * Update configuration
+   */
+  updateConfig(config: Partial<VisionProviderConfig>): void {
+    this.config = { ...this.config, ...config };
+  }
+
+  /**
+   * Get provider status
+   */
+  async getStatus(): Promise<{
+    available: boolean;
+    message: string;
+    config: VisionProviderConfig;
+  }> {
     return {
-      healthy: false,
-      latencyMs: 0,
-      message: `${this.name} is not configured (stub implementation)`,
+      available: false,
+      message: `${this.name} is a stub implementation. Not yet available.`,
+      config: this.getConfig(),
     };
   }
-
-  /**
-   * Get the environment variable name for the API key.
-   */
-  protected abstract getApiKeyEnvVar(): string;
 }
-
-// ─── OpenAI Vision Provider Stub ───
-
-export class OpenAIVisionProvider extends StubVisionProvider {
-  readonly name = "OpenAI Vision";
-  readonly providerId = "openai";
-  readonly supportedFeatures: VisionFeatureFlags = {
-    patterns: true,
-    levels: true,
-    trend: true,
-    candlestickPatterns: true,
-    indicators: true,
-    volume: false,
-    annotations: true,
-    tradeData: true,
-    platform: true,
-  };
-
-  protected getApiKeyEnvVar(): string {
-    return "VITE_OPENAI_API_KEY";
-  }
-}
-
-// ─── Google Gemini Vision Provider Stub ───
-
-export class GeminiVisionProvider extends StubVisionProvider {
-  readonly name = "Google Gemini Vision";
-  readonly providerId = "gemini";
-  readonly supportedFeatures: VisionFeatureFlags = {
-    patterns: true,
-    levels: true,
-    trend: true,
-    candlestickPatterns: true,
-    indicators: true,
-    volume: true,
-    annotations: true,
-    tradeData: true,
-    platform: true,
-  };
-
-  protected getApiKeyEnvVar(): string {
-    return "VITE_GEMINI_API_KEY";
-  }
-}
-
-// ─── Anthropic Claude Vision Provider Stub ───
-
-export class ClaudeVisionProvider extends StubVisionProvider {
-  readonly name = "Anthropic Claude Vision";
-  readonly providerId = "claude";
-  readonly supportedFeatures: VisionFeatureFlags = {
-    patterns: true,
-    levels: true,
-    trend: true,
-    candlestickPatterns: true,
-    indicators: true,
-    volume: false,
-    annotations: true,
-    tradeData: true,
-    platform: false,
-  };
-
-  protected getApiKeyEnvVar(): string {
-    return "VITE_CLAUDE_API_KEY";
-  }
-}
-
-// ─── OpenRouter Vision Provider Stub ───
-
-export class OpenRouterVisionProvider extends StubVisionProvider {
-  readonly name = "OpenRouter Vision";
-  readonly providerId = "openrouter";
-  readonly supportedFeatures: VisionFeatureFlags = {
-    patterns: true,
-    levels: true,
-    trend: true,
-    candlestickPatterns: true,
-    indicators: true,
-    volume: true,
-    annotations: true,
-    tradeData: true,
-    platform: true,
-  };
-
-  protected getApiKeyEnvVar(): string {
-    return "VITE_OPENROUTER_API_KEY";
-  }
-}
-
-// ─── Provider Factory ───
-
-export type StubVisionProviderType =
-  | "openai"
-  | "gemini"
-  | "claude"
-  | "openrouter";
 
 /**
- * Create a stub vision provider by type.
+ * Google Cloud Vision stub
+ */
+export class GoogleCloudVisionProvider extends BaseStubVisionProvider {
+  readonly providerId = "google-cloud-vision";
+  readonly name = "Google Cloud Vision";
+}
+
+/**
+ * Azure Computer Vision stub
+ */
+export class AzureComputerVisionProvider extends BaseStubVisionProvider {
+  readonly providerId = "azure-computer-vision";
+  readonly name = "Azure Computer Vision";
+}
+
+/**
+ * AWS Textract stub
+ */
+export class AWSTextractProvider extends BaseStubVisionProvider {
+  readonly providerId = "aws-textract";
+  readonly name = "AWS Textract";
+}
+
+/**
+ * Tesseract Vision stub (for future native integration)
+ */
+export class TesseractVisionProvider extends BaseStubVisionProvider {
+  readonly providerId = "tesseract-vision";
+  readonly name = "Tesseract Vision";
+}
+
+/**
+ * OpenAI Vision stub (for future GPT-4V integration)
+ */
+export class OpenAIVisionProvider extends BaseStubVisionProvider {
+  readonly providerId = "openai-vision";
+  readonly name = "OpenAI Vision";
+}
+
+/**
+ * Factory function to create the appropriate stub provider
  */
 export function createStubVisionProvider(
-  type: StubVisionProviderType,
+  providerId: string,
   config?: Partial<VisionProviderConfig>
-): StubVisionProvider {
-  switch (type) {
-    case "openai": return new OpenAIVisionProvider(config);
-    case "gemini": return new GeminiVisionProvider(config);
-    case "claude": return new ClaudeVisionProvider(config);
-    case "openrouter": return new OpenRouterVisionProvider(config);
+): VisionProvider {
+  switch (providerId) {
+    case "google-cloud-vision":
+      return new GoogleCloudVisionProvider(config);
+    case "azure-computer-vision":
+      return new AzureComputerVisionProvider(config);
+    case "aws-textract":
+      return new AWSTextractProvider(config);
+    case "tesseract-vision":
+      return new TesseractVisionProvider(config);
+    case "openai-vision":
+      return new OpenAIVisionProvider(config);
     default:
-      throw new Error(`Unknown stub vision provider type: ${type}`);
+      throw new Error(`Unknown vision provider: ${providerId}`);
   }
-}
-
-/**
- * Get all available stub provider types.
- */
-export function getStubVisionProviderTypes(): StubVisionProviderType[] {
-  return ["openai", "gemini", "claude", "openrouter"];
-}
-
-/**
- * Create all stub providers at once.
- */
-export function createAllStubVisionProviders(): StubVisionProvider[] {
-  return getStubVisionProviderTypes().map((type) => createStubVisionProvider(type));
 }
