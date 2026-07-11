@@ -137,6 +137,8 @@ export interface ScreenshotAnalysis {
   id: string;
   /** Original screenshot as base64 data URL */
   screenshotDataUrl: string;
+  /** Persistent Cloudinary URL for the screenshot (survives page refresh) */
+  imageUrl: string | null;
   /** OCR extracted text */
   ocrText: string;
   /** OCR result */
