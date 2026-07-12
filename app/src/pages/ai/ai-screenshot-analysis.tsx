@@ -2,17 +2,19 @@
  * AI Screenshot Analysis Page
  * Phase 7C: AI Trade Extraction, Workspace History & Smart Journal Integration
  * Phase 7D-1: Fixed screenshot persistence via Cloudinary, restored edit button, voice notes fix
+ * Phase 7D-2: Extended with Mesh AI Professional Trade Analysis
  *
  * Workflow:
  *   Upload Screenshot → Cloudinary Upload → Image Quality Analysis → Enhanced OCR →
- *   Trade Extraction → AI Advice → Review/Edit → Import → Journal Integration
+ *   Trade Extraction → AI Advice → Mesh AI Analysis → Review/Edit → Import → Journal Integration
  *
  * Features:
- - Persistent screenshot storage via Cloudinary (survives page refresh)
+ * - Persistent screenshot storage via Cloudinary (survives page refresh)
  * - Editable extracted trade fields before import
  * - Smart image quality analysis with OCR accuracy prediction
  * - Enhanced multi-pass OCR with preprocessing
  * - AI trade advice based on extracted data and journal history
+ * - Professional Mesh AI Trade Analysis (Phase 7D-2)
  * - Color-coded review UI (green/yellow/red)
  * - Automatic journal integration
  * - Workspace dashboard stats
@@ -28,11 +30,11 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useOCR } from "@/hooks/use-ocr";
-import { useScreenshotHistory } from "@/hooks/ai";
+import { useScreenshotHistory, useTradeDataAnalysis } from "@/hooks/ai";
 import { useTrades } from "@/hooks/use-trades";
 import { analyzeImageQuality, generateTradeAdvice, ocrResultToExtractedTrade } from "@/services/ai";
 import { uploadToCloudinary, compressImage } from "@/services/cloudinaryService";
-import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData } from "@/services/ai";
+import type { ScreenshotAnalysis, ImageQualityMetrics, TradeAdvice, ExtractedTradeData, ProfessionalTradeAnalysis } from "@/services/ai";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -225,6 +227,213 @@ function TradeAdviceDisplay({ advice, symbol }: { advice: TradeAdvice; symbol?: 
   );
 }
 
+// ─── Professional Trade Analysis Display (Phase 7D-2) ───
+
+function ProfessionalAnalysisDisplay({ analysis }: { analysis: ProfessionalTradeAnalysis }) {
+  const ScoreBar = ({ label, score, color }: { label: string; score: number; color: string }) => (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className={cn("text-xs font-bold", color)}>{score}/100</span>
+      </div>
+      <div className="h-2 rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all", score >= 70 ? "bg-green-500" : score >= 50 ? "bg-amber-500" : "bg-red-500")}
+          style={{ width: `${score}%` }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Overall Score */}
+      <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+        <div className={cn("flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold shrink-0",
+          analysis.overallTradeScore >= 70 ? "bg-green-500 text-white" :
+          analysis.overallTradeScore >= 50 ? "bg-amber-500 text-white" : "bg-red-500 text-white"
+        )}>
+          {analysis.overallTradeScore}
+        </div>
+        <div>
+          <p className="text-sm font-semibold">Overall Trade Score</p>
+          <p className="text-xs text-muted-foreground">
+            {analysis.overallTradeScore >= 70 ? "Well-structured trade" :
+             analysis.overallTradeScore >= 50 ? "Moderate quality — review recommended" :
+             "Multiple issues detected"}
+          </p>
+        </div>
+        <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
+          {analysis.provider}
+        </Badge>
+      </div>
+
+      {/* Score Breakdown */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ScoreBar label="Entry Quality" score={analysis.entryQuality.score} color="text-green-600" />
+        <ScoreBar label="Stop Loss" score={analysis.stopLossAnalysis.score} color="text-red-600" />
+        <ScoreBar label="Take Profit" score={analysis.takeProfitAnalysis.score} color="text-blue-600" />
+        <ScoreBar label="Risk:Reward" score={analysis.riskRewardEvaluation.score} color="text-purple-600" />
+        <ScoreBar label="Trend Alignment" score={analysis.trendAlignment.score} color="text-cyan-600" />
+        <ScoreBar label="Position Size" score={analysis.positionSizeFeedback.score} color="text-orange-600" />
+      </div>
+
+      {/* Detailed Analysis Cards */}
+      <div className="grid grid-cols-1 gap-2">
+        <AnalysisCard
+          title="Entry Quality"
+          score={analysis.entryQuality.score}
+          assessment={analysis.entryQuality.assessment}
+          comment={analysis.entryQuality.comment}
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+        <AnalysisCard
+          title="Stop Loss Analysis"
+          score={analysis.stopLossAnalysis.score}
+          assessment={analysis.stopLossAnalysis.assessment}
+          comment={analysis.stopLossAnalysis.comment}
+          icon={<TrendingDown className="h-4 w-4" />}
+        />
+        <AnalysisCard
+          title="Take Profit Analysis"
+          score={analysis.takeProfitAnalysis.score}
+          assessment={analysis.takeProfitAnalysis.assessment}
+          comment={analysis.takeProfitAnalysis.comment}
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+        <AnalysisCard
+          title="Risk:Reward Evaluation"
+          score={analysis.riskRewardEvaluation.score}
+          assessment={analysis.riskRewardEvaluation.assessment}
+          comment={analysis.riskRewardEvaluation.comment}
+          icon={<BarChart3 className="h-4 w-4" />}
+          extra={analysis.riskRewardEvaluation.ratio !== null ? `R:R = 1:${analysis.riskRewardEvaluation.ratio.toFixed(1)}` : undefined}
+        />
+        <AnalysisCard
+          title="Trend Alignment"
+          score={analysis.trendAlignment.score}
+          assessment={analysis.trendAlignment.assessment}
+          comment={analysis.trendAlignment.comment}
+          icon={<Sparkles className="h-4 w-4" />}
+        />
+        <AnalysisCard
+          title="Position Size Feedback"
+          score={analysis.positionSizeFeedback.score}
+          assessment={analysis.positionSizeFeedback.assessment}
+          comment={analysis.positionSizeFeedback.comment}
+          icon={<Gauge className="h-4 w-4" />}
+        />
+      </div>
+
+      {/* Mistakes Detected */}
+      {analysis.mistakesDetected.length > 0 && (
+        <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20">
+          <p className="text-xs font-medium text-red-700 dark:text-red-300 flex items-center gap-1 mb-2">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Mistakes Detected ({analysis.mistakesDetected.length})
+          </p>
+          <div className="space-y-1">
+            {analysis.mistakesDetected.map((mistake, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0 mt-0.5" />
+                <span className="text-red-800 dark:text-red-200">{mistake}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Psychology Observations */}
+      {analysis.psychologyObservations.length > 0 && (
+        <div className="p-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20">
+          <p className="text-xs font-medium text-purple-700 dark:text-purple-300 flex items-center gap-1 mb-2">
+            <Brain className="h-3.5 w-3.5" />
+            Psychology Observations
+          </p>
+          <div className="space-y-1">
+            {analysis.psychologyObservations.map((obs, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <Info className="h-3.5 w-3.5 text-purple-400 shrink-0 mt-0.5" />
+                <span className="text-purple-800 dark:text-purple-200">{obs}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Suggested Improvements */}
+      {analysis.suggestedImprovements.length > 0 && (
+        <div className="p-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20">
+          <p className="text-xs font-medium text-green-700 dark:text-green-300 flex items-center gap-1 mb-2">
+            <Lightbulb className="h-3.5 w-3.5" />
+            Suggested Improvements
+          </p>
+          <div className="space-y-1">
+            {analysis.suggestedImprovements.map((imp, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <Check className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" />
+                <span className="text-green-800 dark:text-green-200">{imp}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Professional Summary */}
+      <div className="p-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20">
+        <p className="text-xs font-medium text-blue-700 dark:text-blue-300 flex items-center gap-1 mb-1">
+          <Sparkles className="h-3.5 w-3.5" />
+          Professional Summary
+        </p>
+        <p className="text-sm text-blue-800 dark:text-blue-200 leading-relaxed">{analysis.professionalSummary}</p>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>Confidence: {analysis.confidenceLevel}%</span>
+        <span>Generated in {analysis.processingTimeMs}ms via {analysis.model}</span>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisCard({
+  title,
+  score,
+  assessment,
+  comment,
+  icon,
+  extra,
+}: {
+  title: string;
+  score: number;
+  assessment: string;
+  comment: string;
+  icon: React.ReactNode;
+  extra?: string;
+}) {
+  return (
+    <div className={cn("p-3 rounded-lg border",
+      score >= 70 ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20" :
+      score >= 50 ? "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20" :
+      "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20"
+    )}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className={cn("shrink-0", score >= 70 ? "text-green-600" : score >= 50 ? "text-amber-600" : "text-red-600")}>
+          {icon}
+        </span>
+        <span className="text-xs font-medium flex-1">{title}</span>
+        <span className={cn("text-xs font-bold", score >= 70 ? "text-green-600" : score >= 50 ? "text-amber-600" : "text-red-600")}>
+          {score}/100
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">{assessment}</p>
+      {extra && <p className="text-xs font-medium mt-1 text-primary">{extra}</p>}
+      <p className="text-[11px] text-muted-foreground/70 mt-1 italic">{comment}</p>
+    </div>
+  );
+}
+
 // ─── History Panel ───
 
 function HistoryPanel({ onSelectAnalysis, selectedId }: { onSelectAnalysis: (analysis: ScreenshotAnalysis) => void; selectedId: string | null }) {
@@ -377,6 +586,7 @@ export default function AIScreenshotAnalysis() {
 
   const ocr = useOCR();
   const history = useScreenshotHistory();
+  const tradeDataAnalysis = useTradeDataAnalysis();
 
   const trades = useTrades({
     userId: user?.uid,
@@ -388,6 +598,7 @@ export default function AIScreenshotAnalysis() {
   const [expandedText, setExpandedText] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(true);
   const [selectedAnalysis, setSelectedAnalysis] = useState<ScreenshotAnalysis | null>(null);
+  const [professionalAnalysis, setProfessionalAnalysis] = useState<ProfessionalTradeAnalysis | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedTrade, setEditedTrade] = useState<Partial<ExtractedTradeData>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -459,8 +670,14 @@ export default function AIScreenshotAnalysis() {
       const extractedTrade = result.trades.length > 0 ? ocrResultToExtractedTrade(result) : null;
 
       let aiAdvice: TradeAdvice | null = null;
+      let professionalAnalysisResult: ProfessionalTradeAnalysis | null = null;
       if (extractedTrade) {
         try { aiAdvice = generateTradeAdvice(extractedTrade, trades.trades); } catch { /* non-critical */ }
+        // Phase 7D-2: Route structured trade data through aiService → getAIProvider → MeshAIProvider → Mesh API
+        try {
+          const userTier = hasAccess("elite") ? "elite" : hasAccess("aiScreenshotAnalysis") ? "pro" : "free";
+          professionalAnalysisResult = await tradeDataAnalysis.analyze(extractedTrade, userTier);
+        } catch { /* non-critical — OCR results are still usable */ }
       }
 
       const status: ScreenshotAnalysis["status"] = result.trades.length > 0 ? "needs_review" : "error";
@@ -501,6 +718,11 @@ export default function AIScreenshotAnalysis() {
       });
 
       setImages((prev) => prev.map((i) => (i.id === id ? { ...i, status: "completed", analysisId: saved.id } : i)));
+
+      // Store professional analysis for display
+      if (professionalAnalysisResult) {
+        setProfessionalAnalysis(professionalAnalysisResult);
+      }
 
       if (result.trades.length > 0) {
         const confLevel = result.confidenceLevel;
@@ -554,6 +776,7 @@ export default function AIScreenshotAnalysis() {
 
   const handleSelectAnalysis = useCallback((analysis: ScreenshotAnalysis) => {
     setSelectedAnalysis(analysis);
+    setProfessionalAnalysis(null);
     setIsEditing(false);
     setEditedTrade({});
   }, []);
@@ -718,7 +941,7 @@ export default function AIScreenshotAnalysis() {
             {/* Selected Analysis View */}
             {displayAnalysis && (
               <div className="space-y-4">
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => setSelectedAnalysis(null)}>
+                <Button variant="outline" size="sm" className="gap-1" onClick={() => { setSelectedAnalysis(null); setProfessionalAnalysis(null); }}>
                   <ChevronLeft className="h-4 w-4" />
                   Back to Upload
                 </Button>
@@ -878,6 +1101,35 @@ export default function AIScreenshotAnalysis() {
                           </button>
                           {expandedText === "advice" && (
                             <TradeAdviceDisplay advice={displayAnalysis.aiAdvice} symbol={displayAnalysis.extractedTrade?.symbol} />
+                          )}
+                        </div>
+                      )}
+
+                      {/* Phase 7D-2: Professional AI Trade Analysis via Mesh */}
+                      {(tradeDataAnalysis.isLoading || professionalAnalysis) && (
+                        <div>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-primary hover:text-primary/80 transition-colors mb-2"
+                            onClick={() => setExpandedText(expandedText === "mesh" ? null : "mesh")}
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            Professional Trade Analysis (Mesh AI)
+                            {tradeDataAnalysis.isLoading && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                            {!tradeDataAnalysis.isLoading && professionalAnalysis && <Check className="h-3 w-3 text-green-500 ml-1" />}
+                            {expandedText === "mesh" ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+                          </button>
+                          {expandedText === "mesh" && (
+                            <>
+                              {tradeDataAnalysis.isLoading && (
+                                <div className="flex items-center gap-2 p-4 rounded-lg bg-muted/50">
+                                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                  <p className="text-sm text-muted-foreground">Analyzing trade data via Mesh AI...</p>
+                                </div>
+                              )}
+                              {professionalAnalysis && (
+                                <ProfessionalAnalysisDisplay analysis={professionalAnalysis} />
+                              )}
+                            </>
                           )}
                         </div>
                       )}
