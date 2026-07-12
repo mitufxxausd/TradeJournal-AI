@@ -14,6 +14,8 @@ import type {
   CoachingInput,
   VisionAnalyzeRequest,
   TranscriptionRequest,
+  ExtractedTradeData,
+  ProfessionalTradeAnalysis,
 } from "./types";
 import type { AIProvider } from "./providers/types";
 import { getMockAIProvider } from "./providers/mockProvider";
@@ -88,14 +90,12 @@ export async function analyzeScreenshots(
   const requests: VisionAnalyzeRequest[] = imageUrls.map((url) => ({ imageUrl: url }));
   const results: ScreenshotAnalysis[] = [];
 
-  // Process one by one for progress tracking
   for (let i = 0; i < requests.length; i++) {
     try {
       const result = await provider.analyzeScreenshot(requests[i]);
       if (result) results.push(result);
     } catch (err) {
       console.warn(`[AIService] Failed to analyze screenshot ${i}:`, err);
-      // Continue with other screenshots
     }
     onProgress?.(i + 1, requests.length);
   }
@@ -126,7 +126,6 @@ export async function generateTradeAIAnalysis(
   };
 
   try {
-    // Analyze screenshots
     if (screenshotUrls.length > 0 && provider.capabilities.vision) {
       const screenshotAnalyses = await analyzeScreenshots({
         userTier,
@@ -135,19 +134,16 @@ export async function generateTradeAIAnalysis(
       result.screenshots = screenshotAnalyses;
     }
 
-    // Generate trade summary
     if (provider.capabilities.tradeSummary && canUseFeature(userTier, "elite")) {
       const summary = await provider.generateTradeSummary(tradeInput);
       result.tradeSummary = summary;
     }
 
-    // Generate coaching
     if (provider.capabilities.coaching && canUseFeature(userTier, "elite")) {
       const coachingData = await provider.generateCoaching(tradeInput);
       result.coaching = coachingData;
     }
 
-    // Calculate overall score from available confidence values
     const scores: number[] = [];
     if (result.tradeSummary?.confidence) {
       scores.push(result.tradeSummary.confidence);
@@ -219,6 +215,35 @@ export async function generateCoaching(
   }
 
   return provider.generateCoaching(input);
+}
+
+/**
+ * Analyze structured trade data with AI (Phase 7D-2)
+ * Routes through aiService → getAIProvider → MeshAIProvider → Mesh API
+ */
+export async function analyzeTradeData(
+  userTier: SubscriptionTier,
+  extractedData: ExtractedTradeData
+): Promise<ProfessionalTradeAnalysis | null> {
+  const provider = getAIProvider();
+
+  if (!canUseFeature(userTier, "pro")) {
+    console.warn("[AIService] Trade data analysis requires Pro or Elite tier");
+    return null;
+  }
+
+  console.log(`[AIService] Analyzing trade data via ${provider.name} for ${extractedData.symbol}`);
+
+  try {
+    const result = await provider.analyzeTradeData(extractedData);
+    if (result) {
+      console.log(`[AIService] Trade data analysis completed: score=${result.overallTradeScore}`);
+    }
+    return result;
+  } catch (err) {
+    console.error("[AIService] Trade data analysis failed:", err);
+    return null;
+  }
 }
 
 /**

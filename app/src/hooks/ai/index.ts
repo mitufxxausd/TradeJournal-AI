@@ -8,3 +8,5 @@ export { useVision } from "./useVision";
 export { useVoice } from "./useVoice";
 export { useScreenshotHistory } from "./useScreenshotHistory";
 export type { UseScreenshotHistoryReturn } from "./useScreenshotHistory";
+export { useTradeDataAnalysis } from "./useTradeDataAnalysis";
+export type { UseTradeDataAnalysisReturn, TradeDataAnalysisStatus } from "./useTradeDataAnalysis";

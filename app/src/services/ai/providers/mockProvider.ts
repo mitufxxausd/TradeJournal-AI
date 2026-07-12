@@ -19,6 +19,7 @@ import type {
   TranscriptionResult,
   ExtractedTradeData,
   SubscriptionTier,
+  ProfessionalTradeAnalysis,
 } from "../types";
 
 import type { AIModelInfo } from "../types/common";
@@ -307,6 +308,101 @@ function generateMockTranscription(): TranscriptionResult {
   };
 }
 
+function generateMockTradeDataAnalysis(extractedData: ExtractedTradeData): ProfessionalTradeAnalysis {
+  const entry = extractedData.entryPrice ?? 0;
+  const sl = extractedData.stopLoss;
+  const tp = extractedData.takeProfit;
+  const hasSL = sl !== null && sl !== undefined;
+  const hasTP = tp !== null && tp !== undefined;
+
+  let rrRatio: number | null = null;
+  if (hasSL && entry !== 0) {
+    const risk = Math.abs(entry - sl!);
+    const reward = hasTP ? Math.abs(tp! - entry) : 0;
+    rrRatio = risk > 0 ? Math.round((reward / risk) * 10) / 10 : null;
+  }
+
+  const overallScore = Math.min(100, Math.max(30,
+    (hasSL ? 25 : 0) + (hasTP ? 25 : 0) + (rrRatio && rrRatio >= 1.5 ? 30 : 15) + 20
+  ));
+
+  const qualityLabel = overallScore >= 70 ? "solid" : overallScore >= 50 ? "moderate" : "concerning";
+  const dirStr = extractedData.direction || "unknown";
+  const symStr = extractedData.symbol || "unknown";
+
+  return {
+    id: `mock_pta_${Date.now()}`,
+    overallTradeScore: overallScore,
+    entryQuality: {
+      score: Math.min(100, 70 + Math.floor(Math.random() * 25)),
+      assessment: entry > 0 ? "Entry appears well-placed within the market structure." : "Unable to fully assess entry quality due to missing data.",
+      comment: "Consider confirming entry with additional confluences such as candlestick patterns or indicator alignment.",
+    },
+    stopLossAnalysis: {
+      score: hasSL ? Math.min(100, 65 + Math.floor(Math.random() * 30)) : 20,
+      assessment: hasSL
+        ? (Math.abs(entry - sl!) < entry * 0.005 ? "Stop loss is quite tight — consider widening to avoid noise." : "Stop loss placement appears reasonable.")
+        : "No stop loss detected — this is a critical risk management gap.",
+      comment: hasSL
+        ? "Ensure your stop is placed beyond a significant swing point or structure level."
+        : "Always set a stop loss to protect your capital. This is non-negotiable.",
+    },
+    takeProfitAnalysis: {
+      score: hasTP ? Math.min(100, 65 + Math.floor(Math.random() * 30)) : 25,
+      assessment: hasTP ? "Take profit level is defined." : "No take profit detected — consider setting a clear target.",
+      comment: hasTP
+        ? "Review whether the TP aligns with the next key support/resistance level."
+        : "Without a take profit, you may exit prematurely or hold too long.",
+    },
+    riskRewardEvaluation: {
+      ratio: rrRatio,
+      score: rrRatio && rrRatio >= 2 ? 90 : rrRatio && rrRatio >= 1.5 ? 75 : rrRatio && rrRatio >= 1 ? 55 : 30,
+      assessment: rrRatio
+        ? (rrRatio >= 2 ? "Excellent R:R of 1:" + rrRatio.toFixed(1) : rrRatio >= 1.5 ? "Good R:R of 1:" + rrRatio.toFixed(1) : "Below-optimal R:R of 1:" + rrRatio.toFixed(1))
+        : "Cannot calculate R:R — missing stop loss or take profit data.",
+      comment: "Aim for a minimum 1:1.5 risk:reward ratio on every trade. Preferably 1:2 or higher.",
+    },
+    trendAlignment: {
+      score: Math.min(100, 60 + Math.floor(Math.random() * 35)),
+      assessment: extractedData.direction
+        ? dirStr.toUpperCase() + " direction appears contextually aligned."
+        : "Unable to assess trend alignment.",
+      comment: "Always confirm the higher timeframe trend direction before entering.",
+    },
+    positionSizeFeedback: {
+      score: Math.min(100, 70 + Math.floor(Math.random() * 25)),
+      assessment: extractedData.lotSize
+        ? "Position size of " + extractedData.lotSize + " lots appears manageable."
+        : "Position size data not available for assessment.",
+      comment: "Ensure position sizing keeps risk per trade below 2% of account equity.",
+    },
+    mistakesDetected: [
+      !hasSL ? "Missing stop loss — critical risk management error" : null,
+      !hasTP ? "No take profit defined — lack of exit planning" : null,
+      rrRatio && rrRatio < 1 ? "Risk exceeds reward — unfavorable R:R ratio" : null,
+    ].filter((m): m is string => m !== null),
+    psychologyObservations: [
+      "Ensure you are trading according to plan, not emotion.",
+      "FOMO can lead to poor entries — confirm all criteria before entering.",
+    ],
+    suggestedImprovements: [
+      hasSL ? "Consider placing SL beyond recent swing highs/lows for better protection." : "Set a stop loss immediately — never trade without one.",
+      hasTP ? "Review TP placement relative to key structural levels." : "Define a clear take profit target before entering.",
+      "Document your trade setup rationale in your journal for future review.",
+    ],
+    confidenceLevel: Math.min(100, 60 + Math.floor(Math.random() * 35)),
+    professionalSummary: "This " + symStr + " " + dirStr + " trade shows " + qualityLabel + " structure. " +
+      (hasSL && hasTP
+        ? "Both stop loss and take profit are defined."
+        : (!hasSL ? "Critical: no stop loss is set." : "Consider defining a take profit.")) +
+      " Review the detailed analysis for improvement opportunities.",
+    provider: "Mock AI (Demo)",
+    model: "mock-gpt-4o-mini",
+    generatedAt: new Date().toISOString(),
+    processingTimeMs: 800 + Math.floor(Math.random() * 800),
+  };
+}
+
 // ─── Mock AI Provider Implementation ───
 
 export class MockAIProvider implements AIProvider {
@@ -381,6 +477,11 @@ export class MockAIProvider implements AIProvider {
   async generateCoaching(input: CoachingInput): Promise<AICoaching | null> {
     await delay(700 + Math.random() * 700);
     return generateMockCoaching(input);
+  }
+
+  async analyzeTradeData(extractedData: ExtractedTradeData): Promise<ProfessionalTradeAnalysis | null> {
+    await delay(800 + Math.random() * 800);
+    return generateMockTradeDataAnalysis(extractedData);
   }
 
   async transcribeAudio(_request: TranscriptionRequest): Promise<TranscriptionResult | null> {

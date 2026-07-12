@@ -23,6 +23,7 @@ import type {
   TranscriptionResult,
   ExtractedTradeData,
   SubscriptionTier,
+  ProfessionalTradeAnalysis,
 } from "../types";
 
 import type { AIModelInfo } from "../types/common";
@@ -208,6 +209,79 @@ const COACHING_SCHEMA = {
   required: ["plan", "insights", "goals", "feedback", "confidence"],
 } as const;
 
+const TRADE_DATA_ANALYSIS_SCHEMA = {
+  type: "object",
+  properties: {
+    overallTradeScore: { type: "number", description: "Overall trade quality score from 0 to 100" },
+    entryQuality: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["score", "assessment", "comment"],
+    },
+    stopLossAnalysis: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["score", "assessment", "comment"],
+    },
+    takeProfitAnalysis: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["score", "assessment", "comment"],
+    },
+    riskRewardEvaluation: {
+      type: "object",
+      properties: {
+        ratio: { type: ["number", "null"] },
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["ratio", "score", "assessment", "comment"],
+    },
+    trendAlignment: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["score", "assessment", "comment"],
+    },
+    positionSizeFeedback: {
+      type: "object",
+      properties: {
+        score: { type: "number" },
+        assessment: { type: "string" },
+        comment: { type: "string" },
+      },
+      required: ["score", "assessment", "comment"],
+    },
+    mistakesDetected: { type: "array", items: { type: "string" } },
+    psychologyObservations: { type: "array", items: { type: "string" } },
+    suggestedImprovements: { type: "array", items: { type: "string" } },
+    confidenceLevel: { type: "number" },
+    professionalSummary: { type: "string" },
+  },
+  required: [
+    "overallTradeScore", "entryQuality", "stopLossAnalysis", "takeProfitAnalysis",
+    "riskRewardEvaluation", "trendAlignment", "positionSizeFeedback",
+    "mistakesDetected", "psychologyObservations", "suggestedImprovements",
+    "confidenceLevel", "professionalSummary",
+  ],
+} as const;
+
 // ─── Prompt Builders ───
 
 function buildScreenshotAnalysisPrompt(): string {
@@ -269,6 +343,36 @@ ${input.psychologyNotes ? `- Psychology Notes: ${input.psychologyNotes}` : ""}
 ${input.recentTrades && input.recentTrades.length > 0 ? `- Recent Trades: ${input.recentTrades.length} trades` : ""}
 
 Generate a personalized coaching plan. Respond ONLY with valid JSON matching the provided schema.`;
+}
+
+function buildTradeDataAnalysisPrompt(data: ExtractedTradeData): string {
+  return `You are an expert trading analyst AI with decades of experience. Perform a comprehensive professional analysis of the following trade data extracted from a trading screenshot:
+
+Extracted Trade Data:
+- Symbol: ${data.symbol || "N/A"}
+- Direction: ${data.direction || "N/A"}
+- Entry Price: ${data.entryPrice ?? "N/A"}
+- Stop Loss: ${data.stopLoss ?? "N/A"}
+- Take Profit: ${data.takeProfit ?? "N/A"}
+- Lot Size: ${data.lotSize ?? "N/A"}
+- Risk %: ${data.riskPercent ?? "N/A"}
+- Timeframe: ${data.timeframe ?? "N/A"}
+
+Analyze this trade thoroughly and provide:
+1. Overall Trade Score (0-100) - a holistic assessment of trade quality
+2. Entry Quality - how good the entry appears
+3. Stop Loss Analysis - adequacy and placement of the stop loss
+4. Take Profit Analysis - appropriateness of the take profit level
+5. Risk:Reward Evaluation - calculate and assess the R:R ratio
+6. Trend Alignment - whether the trade direction makes sense
+7. Position Size Feedback - whether position sizing is appropriate
+8. Mistakes Detected - any errors or suboptimal choices visible
+9. Psychology Observations - psychological factors that may be at play
+10. Suggested Improvements - actionable recommendations
+11. Confidence Level (0-100) - how confident you are in this assessment
+12. Professional Summary - a concise expert summary
+
+Respond ONLY with valid JSON matching the provided schema.`;
 }
 
 // ─── Helper: Call Mesh Chat Completions ───
@@ -366,7 +470,6 @@ export class MeshAIProvider implements AIProvider {
     console.log(`[MeshAI] Analyzing screenshot via Mesh API: ${request.imageUrl.slice(0, 50)}...`);
 
     try {
-      // Build image content: prefer base64 if available, otherwise use URL
       const imageContent = request.imageBase64
         ? { type: "image_url" as const, image_url: { url: `data:${request.mimeType ?? "image/jpeg"};base64,${request.imageBase64}`, detail: "high" as const } }
         : { type: "image_url" as const, image_url: { url: request.imageUrl, detail: "high" as const } };
@@ -575,7 +678,6 @@ export class MeshAIProvider implements AIProvider {
 
       const processingTimeMs = Date.now() - startTime;
 
-      // Enrich items with IDs
       const itemsWithIds: CoachingItem[] = result.plan.items.map((item) => ({
         ...item,
         id: generateMeshId("mesh_ci"),
@@ -614,6 +716,59 @@ export class MeshAIProvider implements AIProvider {
     }
   }
 
+  // ─── Structured Trade Data Analysis (Phase 7D-2) ───
+
+  async analyzeTradeData(extractedData: ExtractedTradeData): Promise<ProfessionalTradeAnalysis | null> {
+    const startTime = Date.now();
+    console.log(`[MeshAI] Analyzing structured trade data via Mesh API for ${extractedData.symbol} ${extractedData.direction}`);
+
+    try {
+      const result = await meshChatCompletion<{
+        overallTradeScore: number;
+        entryQuality: { score: number; assessment: string; comment: string };
+        stopLossAnalysis: { score: number; assessment: string; comment: string };
+        takeProfitAnalysis: { score: number; assessment: string; comment: string };
+        riskRewardEvaluation: { ratio: number | null; score: number; assessment: string; comment: string };
+        trendAlignment: { score: number; assessment: string; comment: string };
+        positionSizeFeedback: { score: number; assessment: string; comment: string };
+        mistakesDetected: string[];
+        psychologyObservations: string[];
+        suggestedImprovements: string[];
+        confidenceLevel: number;
+        professionalSummary: string;
+      }>({
+        model: DEFAULT_CHAT_MODEL,
+        messages: [
+          { role: "system", content: "You are an expert professional trading analyst. Respond only with JSON." },
+          { role: "user", content: buildTradeDataAnalysisPrompt(extractedData) },
+        ],
+        temperature: 0.3,
+        max_tokens: 4096,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "professional_trade_analysis",
+            schema: TRADE_DATA_ANALYSIS_SCHEMA as unknown as Record<string, unknown>,
+          },
+        },
+      });
+
+      const processingTimeMs = Date.now() - startTime;
+
+      return {
+        id: generateMeshId("mesh_pta"),
+        ...result,
+        provider: this.name,
+        model: DEFAULT_CHAT_MODEL,
+        generatedAt: new Date().toISOString(),
+        processingTimeMs,
+      };
+    } catch (err) {
+      console.error("[MeshAI] Trade data analysis failed:", err);
+      return null;
+    }
+  }
+
   // ─── Transcription ───
 
   async transcribeAudio(request: TranscriptionRequest): Promise<TranscriptionResult | null> {
@@ -624,7 +779,6 @@ export class MeshAIProvider implements AIProvider {
       formData.append("model", DEFAULT_TRANSCRIPTION_MODEL);
 
       if (request.audioBase64) {
-        // Convert base64 to blob
         const byteCharacters = atob(request.audioBase64);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -634,7 +788,6 @@ export class MeshAIProvider implements AIProvider {
         const blob = new Blob([byteArray], { type: request.mimeType ?? "audio/webm" });
         formData.append("file", blob, "audio.webm");
       } else {
-        // Fetch audio from URL and append
         const audioResponse = await fetch(request.audioUrl);
         const blob = await audioResponse.blob();
         const mimeType = request.mimeType ?? blob.type ?? "audio/webm";
@@ -648,7 +801,6 @@ export class MeshAIProvider implements AIProvider {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          // NOTE: Do NOT set Content-Type manually for FormData
         },
         body: formData,
       });

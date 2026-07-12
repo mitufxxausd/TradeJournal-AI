@@ -290,6 +290,7 @@ export type {
   HistoryGroup,
   HistoryFilters,
   HistorySort,
+  ProfessionalTradeAnalysis,
 } from "./types/screenshot-analysis";
 
 export {
