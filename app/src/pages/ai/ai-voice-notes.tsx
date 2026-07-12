@@ -247,10 +247,15 @@ try {
 } finally {
   setIsUploading(false);
 }
+}, [
+  recorder,
+  speech,
+  voiceNotes.length,
+]);
 
-  // ─── Playback ───
+// ─── Playback ───
 
-  const handlePlay = useCallback((note: VoiceNote) => {
+const handlePlay = useCallback((note: VoiceNote) => {
     try {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -821,3 +826,5 @@ try {
     </AppLayout>
   );
 }
+
+

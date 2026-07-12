@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import type { AIProvider } from "./providers/types";
 import { getMockAIProvider } from "./providers/mockProvider";
+import { getMeshAIProvider } from "./providers/meshProvider";
 
 // ─── Local Types ───
 
@@ -42,13 +43,13 @@ export function setAIProvider(provider: AIProvider): void {
 
 export function getAIProvider(): AIProvider {
   if (!activeProvider) {
-    activeProvider = getMockAIProvider();
+    activeProvider = getMeshAIProvider();
   }
   return activeProvider;
 }
 
-export function resetToMockProvider(): void {
-  activeProvider = getMockAIProvider();
+export function resetToMeshProvider(): void {
+  activeProvider = getMeshAIProvider();
 }
 
 // ─── Feature Gating Helpers ───
